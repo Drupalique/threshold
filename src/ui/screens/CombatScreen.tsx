@@ -125,10 +125,12 @@ export function CombatScreen() {
     dispatchCombat({ type: 'PLAYER_PASS' });
   }
 
+  // poolSetSize is a property of the suit's pool pile, not of any one
+  // target -- every enemy offered for a threat suit shares the same value
+  // (see getLegalPlayerClaimTargets), so this must not filter by target or
+  // it reads as 0 while the player is still picking who to target.
   const poolSetSize = selectedSuit
-    ? (legalTargets.find(
-        (t) => t.suit === selectedSuit && t.targetInstanceId === (selectedTargetInstanceId ?? undefined),
-      )?.poolSetSize ?? 0)
+    ? (legalTargets.find((t) => t.suit === selectedSuit)?.poolSetSize ?? 0)
     : 0;
   const hasChosenTarget = suitNeedsNoTarget || selectedTargetInstanceId !== null;
   const canClaim =

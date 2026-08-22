@@ -35,7 +35,10 @@ export function ClaimControls({
       {isPlayerTurn && (
         <>
           {needsTarget ? (
-            <div className="claim-controls-note">Click an enemy above to target with {selectedSuitName}.</div>
+            <div className="claim-controls-note">
+              Click an enemy above to target with {selectedSuitName} ({poolSetSize} x {selectedCount} ={' '}
+              {poolSetSize * selectedCount}).
+            </div>
           ) : canClaim ? (
             <div className="claim-preview">
               Claim {selectedSuitName}: {poolSetSize} x {selectedCount} ={' '}

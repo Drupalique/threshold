@@ -106,7 +106,8 @@ button {
 }
 
 .enemy-card {
-  flex: 1 1 160px;
+  flex: 0 0 200px;
+  width: 200px;
   background: #1c1c26;
   border: 2px solid transparent;
   border-radius: 8px;
@@ -114,6 +115,7 @@ button {
   text-align: left;
   font: inherit;
   color: inherit;
+  box-sizing: border-box;
 }
 
 .enemy-card--targetable {
