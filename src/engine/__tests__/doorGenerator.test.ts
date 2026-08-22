@@ -5,7 +5,7 @@ import { generateDoorPair } from '../doorGenerator';
 describe('door generation', () => {
   it('produces 2 doors each referencing a distinct branch root by id (never embedding room data)', () => {
     const rng = createRng(42);
-    const { doors, branchRoots } = generateDoorPair(rng);
+    const { doors, branchRoots } = generateDoorPair(rng, 5);
     expect(doors.length).toBe(2);
     expect(branchRoots.length).toBe(2);
     for (const door of doors) {
@@ -22,7 +22,7 @@ describe('door generation', () => {
     let matches = 0;
     let total = 0;
     for (let i = 0; i < 200; i++) {
-      const { doors, branchRoots } = generateDoorPair(rng);
+      const { doors, branchRoots } = generateDoorPair(rng, 5);
       for (const door of doors) {
         const room = branchRoots.find((b) => b.id === door.branchRootId)!.room;
         total++;

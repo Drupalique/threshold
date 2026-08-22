@@ -8,6 +8,11 @@ interface ClaimControlsProps {
   selectedCount: number;
   canClaim: boolean;
   hasAnyLegalClaim: boolean;
+  // True whenever the selected threat suit has 2+ alive enemies to choose
+  // from and none has been picked yet -- a threat pile isn't owned by any
+  // one enemy, so the player picks who takes the hit by clicking the
+  // enemy's card directly (see EnemyPanel), not a menu here.
+  needsTarget: boolean;
   onClaim: () => void;
   onPass: () => void;
 }
@@ -20,6 +25,7 @@ export function ClaimControls({
   selectedCount,
   canClaim,
   hasAnyLegalClaim,
+  needsTarget,
   onClaim,
   onPass,
 }: ClaimControlsProps) {
@@ -28,7 +34,9 @@ export function ClaimControls({
       {!isPlayerTurn && <div className="claim-controls-note">Waiting on the room...</div>}
       {isPlayerTurn && (
         <>
-          {canClaim ? (
+          {needsTarget ? (
+            <div className="claim-controls-note">Click an enemy above to target with {selectedSuitName}.</div>
+          ) : canClaim ? (
             <div className="claim-preview">
               Claim {selectedSuitName}: {poolSetSize} x {selectedCount} ={' '}
               <strong>{poolSetSize * selectedCount}</strong>

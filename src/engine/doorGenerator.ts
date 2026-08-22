@@ -3,6 +3,7 @@ import type { PoolSizeBand } from '../types/room';
 import type { Rng } from './rng';
 import { generateRoom } from './roomGenerator';
 import { uniformPick } from './weightedPick';
+import { enemyDefById } from '../config/enemies';
 import { SUIT_COLOR_FAMILY, DOOR_CORRELATION_RATE } from '../config/constants';
 
 let doorCounter = 0;
@@ -27,18 +28,23 @@ function flipTexture(texture: DoorTexture): DoorTexture {
  * Each tag axis is rolled independently against DOOR_CORRELATION_RATE: a
  * real probabilistic roll against the generated room, not flavor text.
  */
-export function generateDoorPair(rng: Rng): { doors: Door[]; branchRoots: BranchRoot[] } {
+export function generateDoorPair(rng: Rng, floor: number): { doors: Door[]; branchRoots: BranchRoot[] } {
   const doors: Door[] = [];
   const branchRoots: BranchRoot[] = [];
 
   for (let i = 0; i < 2; i++) {
-    const room = generateRoom(rng);
+    const room = generateRoom(rng, floor);
     const branchRoot: BranchRoot = { id: `branch-${room.id}`, depth: 1, room };
 
     const trueSize: PoolSizeBand = room.params.sizeBand;
     const trueColor: DoorColor =
-      SUIT_COLOR_FAMILY[room.params.dominantSuit] ?? uniformPick(rng, ['red', 'blue']);
-    const trueTexture: DoorTexture = room.pool.some((c) => c.kind === 'surprise')
+      SUIT_COLOR_FAMILY[room.params.primarySuit] ?? uniformPick(rng, ['red', 'blue']);
+    // "Jagged" now reads as "a pool-manipulating enemy lurks here" -- the
+    // Corrupt intent's flavor took over the role the old random surprise
+    // card used to play for this tag.
+    const trueTexture: DoorTexture = room.enemies.some((e) =>
+      enemyDefById(e.defId).pattern.some((step) => step.type === 'corrupt'),
+    )
       ? 'jagged'
       : 'smooth';
 

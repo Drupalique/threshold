@@ -7,19 +7,17 @@ interface LogPlayback {
   displayedPlayerHP: number;
   displayedPlayerHPMax: number;
   displayedPlayerGuard: number;
-  displayedRoomThreat: number;
-  displayedRoomThreatMax: number;
   isPlaying: boolean;
 }
 
 /**
  * Reveals newly appended log entries one at a time instead of snapping
- * straight to the resolved state -- so a claim's heal and an unrelated
- * suit's decay penalty landing in the same turn-end tick read as a
- * sequence (heal, then hit) instead of a single blended net number.
- * History present when `log` first arrives (mount, or a fresh room's log
- * replacing the previous one) is revealed immediately; only entries
- * appended after that are queued up and drip out over time.
+ * straight to the resolved state -- so e.g. a decay penalty landing right
+ * after an enemy's attack in the same turn-end tick reads as a sequence
+ * instead of a single blended net number. History present when `log` first
+ * arrives (mount, or a fresh room's log replacing the previous one) is
+ * revealed immediately; only entries appended after that are queued up and
+ * drip out over time.
  */
 export function useLogPlayback(log: LogEntry[]): LogPlayback {
   const [revealedCount, setRevealedCount] = useState(log.length);
@@ -45,8 +43,6 @@ export function useLogPlayback(log: LogEntry[]): LogPlayback {
     displayedPlayerHP: last?.playerHP ?? 0,
     displayedPlayerHPMax: last?.playerHPMax ?? 0,
     displayedPlayerGuard: last?.playerGuard ?? 0,
-    displayedRoomThreat: last?.roomThreat ?? 0,
-    displayedRoomThreatMax: last?.roomThreatMax ?? 0,
     isPlaying: revealedCount < log.length,
   };
 }

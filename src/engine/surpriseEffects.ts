@@ -1,70 +1,50 @@
 import type { SuitId } from '../types/suits';
 import type { Card } from '../types/cards';
-import type { RoomParams } from '../types/room';
 import type { Rng } from './rng';
 import { uniformPick } from './weightedPick';
 import { generateWeightedDeck } from './deckGenerator';
-import { SURPRISE_ADD_CARDS_COUNT, THREAT_SUITS } from '../config/constants';
+import { SURPRISE_ADD_CARDS_COUNT } from '../config/constants';
+
+/**
+ * Resolution logic for the Corrupt intent's three effects. Originally a
+ * random one-off "surprise card" revealed from the pool (see design doc
+ * 4.1); now these are called deliberately by combatEngine when an enemy's
+ * telegraphed Corrupt step resolves (design doc 4.6/4.7) -- the vocabulary
+ * didn't change, only who triggers it and when.
+ */
 
 export function resolveAddCards(
   pool: Card[],
-  params: RoomParams,
+  threatSuits: SuitId[],
   rng: Rng,
   idPrefix: string,
 ): Card[] {
-  const offSuitPool = THREAT_SUITS.filter((s) => s !== params.dominantSuit);
+  if (threatSuits.length === 0) return pool;
   const added = generateWeightedDeck(
     SURPRISE_ADD_CARDS_COUNT,
     idPrefix,
-    {
-      dominantSuit: params.dominantSuit,
-      offSuitPool,
-      onSuitRatio: params.onSuitRatio,
-      boonRatio: params.boonRatio,
-      guardRatio: params.guardRatio,
-      surpriseRatio: 0,
-    },
+    { onSuitTargets: threatSuits, onSuitRatio: 1, boonRatio: 0, guardRatio: 0 },
     rng,
   );
   return [...pool, ...added];
 }
 
 export function resolveBlockSuit(pool: Card[], rng: Rng): SuitId | null {
-  const creatureSuits = Array.from(
-    new Set(
-      pool
-        .filter((c): c is Extract<Card, { kind: 'creature' }> => c.kind === 'creature')
-        .map((c) => c.suit),
-    ),
-  );
+  const creatureSuits = Array.from(new Set(pool.map((c) => c.suit)));
   if (creatureSuits.length === 0) return null;
   return uniformPick(rng, creatureSuits);
 }
 
 export interface ForceDiscardResult {
-  actor: 'player' | 'room';
   playerHand: Card[];
-  roomHand: Card[];
   discardedCardId: string | null;
 }
 
-export function resolveForceDiscard(
-  playerHand: Card[],
-  roomHand: Card[],
-  rng: Rng,
-): ForceDiscardResult {
-  const actor: 'player' | 'room' = rng.next() < 0.5 ? 'player' : 'room';
-  const hand = actor === 'player' ? playerHand : roomHand;
-  if (hand.length === 0) {
-    return { actor, playerHand, roomHand, discardedCardId: null };
+export function resolveForceDiscard(playerHand: Card[], rng: Rng): ForceDiscardResult {
+  if (playerHand.length === 0) {
+    return { playerHand, discardedCardId: null };
   }
-  const idx = rng.int(0, hand.length - 1);
-  const discardedCardId = hand[idx].id;
-  const newHand = hand.filter((_, i) => i !== idx);
-  return {
-    actor,
-    playerHand: actor === 'player' ? newHand : playerHand,
-    roomHand: actor === 'room' ? newHand : roomHand,
-    discardedCardId,
-  };
+  const idx = rng.int(0, playerHand.length - 1);
+  const discardedCardId = playerHand[idx].id;
+  return { playerHand: playerHand.filter((_, i) => i !== idx), discardedCardId };
 }

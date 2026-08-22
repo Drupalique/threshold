@@ -1,8 +1,9 @@
 import type { SuitId } from './suits';
 import type { Card } from './cards';
+import type { EnemyInstance } from './enemy';
 import type { RoomParams } from './room';
 
-export type CombatActor = 'player' | 'room';
+export type CombatActor = 'player' | 'enemy';
 
 export type CombatStatus = 'active' | 'room-cleared' | 'player-dead';
 
@@ -12,40 +13,39 @@ export interface LogEntry {
   actor: CombatActor | 'system';
   type: string;
   message: string;
-  // Snapshot of the meters immediately after this entry's effects were
-  // applied, so the log reads as a status trail rather than just events.
+  // Snapshot of the player's meters immediately after this entry's effects
+  // were applied, so the log reads as a status trail. Enemy HP is not
+  // snapshotted per-entry -- the enemy panel reads live state instead (see
+  // PROTOTYPE_STATUS.md: enemy HP updates instantly rather than drip-
+  // animating like the player HP bar does).
   playerHP: number;
   playerHPMax: number;
   playerGuard: number;
-  roomThreat: number;
-  roomThreatMax: number;
-  // Only set on 'claim' entries. The claimed cards are gone from the live
-  // hand/pool arrays by the time this entry exists (performClaim removes
-  // them in the same update), so the UI can't recover "what was claimed"
-  // from current state -- these snapshots are the only record of it, used
-  // to briefly reveal/highlight a room claim before it fades.
-  claimSuit?: SuitId;
-  claimedHandCards?: Card[];
-  claimedPoolCards?: Card[];
 }
 
 export interface CombatState {
   pool: Card[];
   playerHand: Card[];
-  roomHand: Card[];
-  // Kept around (rather than just the initial deals) so a hand can be
-  // regenerated with the same weighting if HAND_REDRAW_EACH_TURN is on.
   roomParams: RoomParams;
+  // Alive enemies only, in stable turn order. A defeated enemy is removed
+  // immediately (see combatEngine's performClaim), never left at 0 HP.
+  enemies: EnemyInstance[];
+  // Which enemies[] index acts next during an 'enemy' phase. Reset to 0
+  // whenever the phase ends and control returns to the player.
+  activeEnemyIndex: number;
   playerHP: number;
   playerHPMax: number;
-  // Absorbs incoming Player HP loss (room threat claims and decay alike)
-  // until it expires at the end of the room's next turn -- a Ward claim is
-  // the player's exclusive defensive tool; the room can't generate its own.
+  // Absorbs incoming Player HP loss until the current enemy phase finishes
+  // (see endTurn's guard-fade handling) -- the player's exclusive
+  // defensive tool, banked via the Ward suit.
   playerGuard: number;
-  roomThreat: number;
-  roomThreatMax: number;
+  // Fraction (0-1) knocked off the magnitude of the player's next threat
+  // claim, set by an enemy's Debuff step. Expires at the end of the
+  // player's next turn whether or not it was used.
+  playerWeakenPct: number;
   turnNumber: number;
   activeTurn: CombatActor;
+  // Keyed by suit -- pool sets are suit-level, not owned by any one enemy.
   decayCounters: Partial<Record<SuitId, number>>;
   blockedSuits: Partial<Record<SuitId, number>>;
   log: LogEntry[];
@@ -55,6 +55,11 @@ export interface CombatState {
 export interface PlayerClaimAction {
   type: 'PLAYER_CLAIM';
   suit: SuitId;
+  // Which alive enemy to direct a threat claim's damage at, chosen freely by
+  // the player -- threat-suit pool cards aren't owned by any one enemy, so
+  // any enemy is a legal target regardless of suit. Required for threat
+  // suits; omit for boon/guard suits, which have no target at all.
+  targetInstanceId?: string;
   handCardIds: string[];
 }
 
@@ -62,8 +67,8 @@ export interface PlayerPassAction {
   type: 'PLAYER_PASS';
 }
 
-export interface RoomTurnAction {
-  type: 'ROOM_TURN';
+export interface EnemyTurnAction {
+  type: 'ENEMY_TURN';
 }
 
-export type CombatAction = PlayerClaimAction | PlayerPassAction | RoomTurnAction;
+export type CombatAction = PlayerClaimAction | PlayerPassAction | EnemyTurnAction;

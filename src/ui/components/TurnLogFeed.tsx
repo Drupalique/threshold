@@ -15,8 +15,8 @@ export function TurnLogFeed({ log, maxEntries = 30 }: TurnLogFeedProps) {
           <li key={entry.id} className={`log-entry log-entry--${entry.actor}`}>
             <div>{entry.message}</div>
             <div className="log-entry-status">
-              HP {Math.max(0, Math.round(entry.playerHP))}/{entry.playerHPMax} -- Threat{' '}
-              {Math.max(0, Math.round(entry.roomThreat))}/{entry.roomThreatMax}
+              HP {Math.max(0, Math.round(entry.playerHP))}/{entry.playerHPMax}
+              {entry.playerGuard > 0 ? ` -- Guard ${entry.playerGuard}` : ''}
             </div>
           </li>
         ))}

@@ -8,44 +8,38 @@ interface PoolDisplayProps {
   blockedSuits: Partial<Record<SuitId, number>>;
   decayCounters: Partial<Record<SuitId, number>>;
   highlightSuit: SuitId | null;
-  // Set briefly right after the room claims a set. Those pool cards are
-  // already gone from `pool` by the time this renders (the claim removes
-  // them in the same update), so this is a snapshot to redraw the set as a
-  // fading "just claimed" group instead of it silently disappearing.
-  claimReveal?: { suit: SuitId; cards: Card[] } | null;
 }
 
-export function PoolDisplay({ pool, blockedSuits, decayCounters, highlightSuit, claimReveal }: PoolDisplayProps) {
+// Piles are grouped by suit alone -- a pile isn't owned by any one enemy
+// (design doc 4.8), so there's exactly one group per suit present, and a
+// claim against it can be aimed at any alive enemy regardless of which
+// suits are on the table.
+export function PoolDisplay({ pool, blockedSuits, decayCounters, highlightSuit }: PoolDisplayProps) {
   const groups = new Map<SuitId, Card[]>();
   for (const card of pool) {
-    if (card.kind !== 'creature') continue;
     if (!groups.has(card.suit)) groups.set(card.suit, []);
     groups.get(card.suit)!.push(card);
   }
 
-  const suitOrder = SUIT_DEFINITIONS.map((s) => s.id).filter((id) => groups.has(id));
+  const orderedSuits = SUIT_DEFINITIONS.map((s) => s.id).filter((suitId) => groups.has(suitId));
 
   return (
     <div className="pool-display">
       <h3>Pool</h3>
       <div className="pool-groups">
-        {suitOrder.map((suit) => {
-          const cards = groups.get(suit)!;
+        {orderedSuits.map((suitId) => {
+          const cards = groups.get(suitId)!;
           const isLive = cards.length >= MIN_POOL_SET_SIZE;
-          const isBlocked = (blockedSuits[suit] ?? 0) > 0;
-          const isHighlighted = highlightSuit === suit;
-          // A single-card "set" or a blocked suit can be selected in hand but
-          // is never actually claimable -- give it a distinct, clearly-not-a-
-          // match style instead of the same highlight a live set gets, so the
-          // disabled Claim button doesn't look inconsistent with the pool.
+          const isBlocked = (blockedSuits[suitId] ?? 0) > 0;
+          const isHighlighted = highlightSuit === suitId;
           const isClaimableHighlight = isHighlighted && isLive && !isBlocked;
           const isUnclaimableHighlight = isHighlighted && (!isLive || isBlocked);
-          // Any live suit ticks toward decay whether or not it's currently
-          // claimable (blocking restricts claiming, not decay eligibility).
-          const turnsUntilDecay = isLive ? DECAY_TURNS_N - (decayCounters[suit] ?? 0) : null;
+          const turnsUntilDecay = isLive ? DECAY_TURNS_N - (decayCounters[suitId] ?? 0) : null;
+          const label = SUIT_DEFINITIONS.find((s) => s.id === suitId)!.name;
+
           return (
             <div
-              key={suit}
+              key={suitId}
               className={[
                 'pool-group',
                 isLive ? 'pool-group--live' : '',
@@ -57,7 +51,7 @@ export function PoolDisplay({ pool, blockedSuits, decayCounters, highlightSuit, 
                 .join(' ')}
             >
               <div className="pool-group-label">
-                {SUIT_DEFINITIONS.find((s) => s.id === suit)!.name} x{cards.length}
+                {label} x{cards.length}
                 {isBlocked && <span className="pool-group-blocked-tag"> blocked</span>}
                 {!isLive && <span className="pool-group-toosmall-tag"> (need {MIN_POOL_SET_SIZE}+)</span>}
                 {turnsUntilDecay !== null && (
@@ -80,30 +74,6 @@ export function PoolDisplay({ pool, blockedSuits, decayCounters, highlightSuit, 
             </div>
           );
         })}
-        {claimReveal && !groups.has(claimReveal.suit) && (
-          <div className="pool-group pool-group--claimed-reveal">
-            <div className="pool-group-label">
-              {SUIT_DEFINITIONS.find((s) => s.id === claimReveal.suit)!.name} x{claimReveal.cards.length}
-              <span className="pool-group-claimed-tag"> claimed by room</span>
-            </div>
-            <div className="pool-group-cards">
-              {claimReveal.cards.map((c) => (
-                <CardChip key={c.id} card={c} claimed />
-              ))}
-            </div>
-          </div>
-        )}
-        {pool.filter((c) => c.kind === 'surprise').length > 0 && (
-          <div className="pool-group">
-            <div className="pool-group-cards">
-              {pool
-                .filter((c) => c.kind === 'surprise')
-                .map((c) => (
-                  <CardChip key={c.id} card={c} />
-                ))}
-            </div>
-          </div>
-        )}
         {pool.length === 0 && <div className="pool-empty">Pool is empty.</div>}
       </div>
     </div>

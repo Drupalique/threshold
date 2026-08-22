@@ -41,11 +41,14 @@ button {
 
 /* --- Meters --- */
 
-.combat-meters {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+.combat-enemies {
   margin-bottom: 0.75rem;
+}
+
+.combat-player-stats {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #2a2a36;
 }
 
 .meter-label {
@@ -80,6 +83,111 @@ button {
   color: white;
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+.weaken-badge {
+  display: inline-block;
+  margin-top: 0.3rem;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #8e2f2f;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* --- Enemies --- */
+
+.enemy-panel-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.enemy-card {
+  flex: 1 1 160px;
+  background: #1c1c26;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.enemy-card--targetable {
+  cursor: pointer;
+  border-color: #4a4ae0;
+}
+
+.enemy-card--targetable:hover {
+  background: #262635;
+}
+
+.enemy-card--selected {
+  border-color: #8f8fff;
+  background: #2c2c52;
+  box-shadow: 0 0 0 2px rgba(143, 143, 255, 0.4);
+}
+
+.enemy-card-target-badge {
+  display: inline-block;
+  margin-bottom: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #6c6cff;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.enemy-card-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  margin-bottom: 0.35rem;
+}
+
+.enemy-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.enemy-guard-badge {
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #16a085;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.enemy-intent-badge {
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #333;
+  color: #eee;
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.enemy-intent-badge--attack {
+  background: #7b2d2d;
+}
+.enemy-intent-badge--guard {
+  background: #1f6f5c;
+}
+.enemy-intent-badge--heal {
+  background: #7a6212;
+}
+.enemy-intent-badge--debuff {
+  background: #5a2a6b;
+}
+.enemy-intent-badge--corrupt {
+  background: #444;
 }
 
 .combat-turn-indicator {
@@ -153,25 +261,6 @@ button {
   cursor: default;
 }
 
-.card-chip--facedown {
-  background: repeating-linear-gradient(45deg, #333, #333 6px, #3a3a3a 6px, #3a3a3a 12px);
-  border: 1px solid #555;
-}
-
-/* Brief reveal of a room claim's hand cards -- distinct from the player's
-   own --selected so a room claim never reads as something the player did. */
-.card-chip--claimed {
-  border-color: #e74c3c;
-  transform: translateY(-3px);
-  animation: claim-pulse 0.9s ease-out;
-}
-
-.card-chip--surprise {
-  background: #333;
-  border: 2px dashed #888;
-  color: #ccc;
-}
-
 /* --- Pool --- */
 
 .pool-groups {
@@ -207,28 +296,6 @@ button {
   border-style: dashed;
 }
 
-/* Ghost group for a pool set the room just claimed -- those cards are
-   already gone from the live pool by the time this renders, so it's drawn
-   as its own fading group rather than a highlight on an existing one. */
-.pool-group--claimed-reveal {
-  border-color: #e74c3c;
-  animation: claim-pulse 0.9s ease-out;
-}
-
-.pool-group-claimed-tag {
-  color: #e74c3c;
-  font-weight: 600;
-}
-
-@keyframes claim-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.55);
-  }
-  100% {
-    box-shadow: 0 0 0 8px rgba(231, 76, 60, 0);
-  }
-}
-
 .pool-group-label {
   font-size: 0.75rem;
   color: #aaa;
@@ -259,10 +326,9 @@ button {
   color: #777;
 }
 
-/* --- Hand / room hand --- */
+/* --- Hand --- */
 
-.hand-cards,
-.room-hand-cards {
+.hand-cards {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
@@ -337,7 +403,7 @@ button {
 .log-entry--player {
   border-left: 3px solid #27ae60;
 }
-.log-entry--room {
+.log-entry--enemy {
   border-left: 3px solid #e74c3c;
 }
 .log-entry--system {
@@ -357,6 +423,12 @@ button {
   justify-content: center;
   gap: 2rem;
   margin-top: 2rem;
+}
+
+.door-choice-log {
+  max-width: 480px;
+  margin: 2.5rem auto 0;
+  text-align: left;
 }
 
 .door-card {

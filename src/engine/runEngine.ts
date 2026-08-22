@@ -24,7 +24,7 @@ export function createNewRun(seed: number): RunState {
 }
 
 export function startFirstRoom(run: RunState): RunState {
-  const room = generateRoom(run.rng);
+  const room = generateRoom(run.rng, run.depth + 1);
   const branchRoot: BranchRoot = { id: `branch-${room.id}`, depth: 1, room };
   const combat = initCombat(room, run.rng, run.playerHP, run.playerHPMax);
   return {
@@ -65,7 +65,7 @@ export function resolveCombatEnd(run: RunState): RunState {
     return { ...run, depth: newDepth, phase: 'run-complete' };
   }
 
-  const { doors, branchRoots } = generateDoorPair(run.rng);
+  const { doors, branchRoots } = generateDoorPair(run.rng, newDepth + 1);
   const branchRootMap = { ...run.branchRoots };
   if (run.currentBranchRootId) delete branchRootMap[run.currentBranchRootId];
   for (const br of branchRoots) branchRootMap[br.id] = br;
