@@ -1,0 +1,389 @@
+.app-shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* --- Start / End screens --- */
+
+.start-screen,
+.run-end-screen {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.tagline {
+  color: #aaa;
+  margin-bottom: 2rem;
+}
+
+.primary-button {
+  background: #4a4ae0;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.75rem 1.5rem;
+  font-size: 1.1rem;
+  margin-top: 1.5rem;
+}
+
+.run-end-screen--win h2 {
+  color: #2ecc71;
+}
+.run-end-screen--loss h2 {
+  color: #e74c3c;
+}
+
+/* --- Meters --- */
+
+.combat-meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.meter-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 0.25rem;
+}
+
+.meter-track {
+  height: 14px;
+  background: #2a2a36;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.meter-with-badge {
+  position: relative;
+}
+
+.guard-badge {
+  display: inline-block;
+  margin-top: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #16a085;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.combat-turn-indicator {
+  text-align: center;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #ccc;
+}
+
+.combat-turn-indicator--dead {
+  color: #e74c3c;
+}
+
+.combat-turn-indicator--cleared {
+  color: #2ecc71;
+}
+
+.blocked-suit-banner {
+  text-align: center;
+  color: #f1c40f;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+/* --- Combat layout --- */
+
+.combat-main {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.5rem;
+}
+
+.combat-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.combat-column--log {
+  border-left: 1px solid #2a2a36;
+  padding-left: 1.5rem;
+}
+
+/* --- Cards --- */
+
+.card-chip {
+  min-width: 64px;
+  height: 44px;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+}
+
+.card-chip--clickable {
+  cursor: pointer;
+}
+
+.card-chip--selected {
+  border-color: #fff;
+  transform: translateY(-3px);
+}
+
+.card-chip--disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.card-chip--facedown {
+  background: repeating-linear-gradient(45deg, #333, #333 6px, #3a3a3a 6px, #3a3a3a 12px);
+  border: 1px solid #555;
+}
+
+/* Brief reveal of a room claim's hand cards -- distinct from the player's
+   own --selected so a room claim never reads as something the player did. */
+.card-chip--claimed {
+  border-color: #e74c3c;
+  transform: translateY(-3px);
+  animation: claim-pulse 0.9s ease-out;
+}
+
+.card-chip--surprise {
+  background: #333;
+  border: 2px dashed #888;
+  color: #ccc;
+}
+
+/* --- Pool --- */
+
+.pool-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.pool-group {
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  border: 2px solid transparent;
+}
+
+.pool-group--live {
+  border-color: #33334a;
+}
+
+.pool-group--blocked {
+  opacity: 0.5;
+}
+
+.pool-group--highlighted {
+  border-color: #4a4ae0;
+}
+
+/* Selected in hand but not actually claimable (fewer than 2 in the pool, or
+   blocked) -- deliberately distinct from the live-and-claimable highlight
+   above so a disabled Claim button never looks inconsistent with the pool. */
+.pool-group--highlighted-invalid {
+  border-color: #e74c3c;
+  border-style: dashed;
+}
+
+/* Ghost group for a pool set the room just claimed -- those cards are
+   already gone from the live pool by the time this renders, so it's drawn
+   as its own fading group rather than a highlight on an existing one. */
+.pool-group--claimed-reveal {
+  border-color: #e74c3c;
+  animation: claim-pulse 0.9s ease-out;
+}
+
+.pool-group-claimed-tag {
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+@keyframes claim-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(231, 76, 60, 0);
+  }
+}
+
+.pool-group-label {
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-bottom: 0.35rem;
+}
+
+.pool-group-blocked-tag,
+.pool-group-toosmall-tag {
+  color: #f1c40f;
+}
+
+.pool-group-decay-tag {
+  color: #888;
+}
+
+.pool-group-decay-tag--urgent {
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+.pool-group-cards {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.pool-empty {
+  color: #777;
+}
+
+/* --- Hand / room hand --- */
+
+.hand-cards,
+.room-hand-cards {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.hand-empty {
+  color: #777;
+}
+
+/* --- Claim controls --- */
+
+.claim-controls {
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.claim-controls-note {
+  color: #999;
+  font-size: 0.9rem;
+}
+
+.claim-preview {
+  margin-bottom: 0.5rem;
+}
+
+.claim-controls-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.claim-controls-buttons button {
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  background: #4a4ae0;
+  color: white;
+}
+
+.claim-controls-buttons button:disabled {
+  background: #333;
+  color: #777;
+  cursor: default;
+}
+
+/* --- Log --- */
+
+.turn-log ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.log-entry {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  background: #1c1c26;
+}
+
+.log-entry-status {
+  font-size: 0.75rem;
+  color: #888;
+  margin-top: 0.15rem;
+}
+
+.log-entry--player {
+  border-left: 3px solid #27ae60;
+}
+.log-entry--room {
+  border-left: 3px solid #e74c3c;
+}
+.log-entry--system {
+  border-left: 3px solid #7f8c8d;
+  color: #bbb;
+}
+
+/* --- Doors --- */
+
+.door-choice-screen {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.door-choices {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-top: 2rem;
+}
+
+.door-card {
+  background: #1c1c26;
+  border: none;
+  border-radius: 10px;
+  padding: 1rem;
+  width: 180px;
+  color: white;
+}
+
+.door-card-visual {
+  height: 140px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+}
+
+.door-card-texture {
+  color: rgba(255, 255, 255, 0.7);
+  font-style: italic;
+}
+
+.door-card-tags {
+  font-size: 0.85rem;
+  color: #ccc;
+  text-align: left;
+}
