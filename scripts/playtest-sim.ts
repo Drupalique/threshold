@@ -17,9 +17,9 @@
 // Usage: npx tsx scripts/playtest-sim.ts [numRuns] [startSeed]
 //        PLAYTEST_BOT=llm npx tsx scripts/playtest-sim.ts 1 1
 import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor } from '../src/engine/runEngine.ts';
-import { getLegalPlayerClaimTargets, type LegalClaimTarget } from '../src/engine/combatEngine.ts';
+import { getLegalPlayerClaimTargets, getFeedableSuits, type LegalClaimTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS, DECAY_TURNS_N } from '../src/config/constants.ts';
-import { pickLlmClaim, llmStats } from './llmBot.ts';
+import { pickLlmClaim, llmStats, type LlmChosenAction } from './llmBot.ts';
 import type { RunState } from '../src/types/run.ts';
 import type { CombatState } from '../src/types/combat.ts';
 import type { SuitId, SuitCategory } from '../src/types/suits.ts';
@@ -53,6 +53,11 @@ interface Metrics {
   unclaimedCardsPerTurn: number[];
   guardWasted: number[];
   guardBanked: number[];
+  // Feeding is only ever offered to the LLM bot (see playPlayerTurn) -- the
+  // heuristic bot has no feed heuristic, so these stay empty in
+  // PLAYTEST_BOT=heuristic runs.
+  feedActions: number;
+  feedCardsPerAction: number[];
   lockstepChecks: number;
   lockstepViolations: number;
   enemyCountAtRoomStart: number[];
@@ -80,6 +85,8 @@ function freshMetrics(): Metrics {
     unclaimedCardsPerTurn: [],
     guardWasted: [],
     guardBanked: [],
+    feedActions: 0,
+    feedCardsPerAction: [],
     lockstepChecks: 0,
     lockstepViolations: 0,
     enemyCountAtRoomStart: [],
@@ -290,7 +297,13 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
     }
 
     const targets = getLegalPlayerClaimTargets(state);
-    if (targets.length === 0) {
+    // Feeding is only offered to the LLM bot -- the heuristic bot
+    // (pickBestClaim) has no feed heuristic, so leaving this empty for
+    // BOT_MODE === 'heuristic' keeps its behavior byte-for-byte identical
+    // to before feed existed (see PLAYTEST_FINDINGS.md's batch numbers,
+    // all of which predate this mechanic).
+    const feedableSuits = BOT_MODE === 'llm' ? getFeedableSuits(state) : [];
+    if (targets.length === 0 && feedableSuits.length === 0) {
       m.deadHandTurns++;
       m.totalPlayerTurns++;
       m.unclaimedCardsPerTurn.push(state.playerHand.length);
@@ -298,13 +311,13 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
       break;
     }
 
-    const chosen =
+    const chosen: LlmChosenAction | null =
       BOT_MODE === 'llm'
-        ? await pickLlmClaim(state, targets)
+        ? await pickLlmClaim(state, targets, feedableSuits)
         : (() => {
             const best = pickBestClaim(state, targets);
             return best && best.score > 0
-              ? { suit: best.suit, targetInstanceId: best.targetInstanceId, handCardIds: best.handCardIds }
+              ? { kind: 'claim' as const, suit: best.suit, targetInstanceId: best.targetInstanceId, handCardIds: best.handCardIds }
               : null;
           })();
 
@@ -314,6 +327,24 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
       m.unclaimedCardsPerTurn.push(state.playerHand.length);
       next = applyCombatAction(next, { type: 'PLAYER_PASS' });
       break;
+    }
+
+    if (chosen.kind === 'feed') {
+      m.feedActions++;
+      m.feedCardsPerAction.push(chosen.handCardIds.length);
+      next = applyCombatAction(next, { type: 'PLAYER_FEED', suit: chosen.suit, handCardIds: chosen.handCardIds });
+      const after = next.combat!;
+      if (!after.unlimitedPlaysThisTurn && after.playsRemaining <= 0) {
+        m.totalPlayerTurns++;
+        m.unclaimedCardsPerTurn.push(after.activeTurn === 'player' ? 0 : after.playerHand.length);
+        break;
+      }
+      if (after.status !== 'active' || after.activeTurn !== 'player') {
+        m.totalPlayerTurns++;
+        m.unclaimedCardsPerTurn.push(after.playerHand.length);
+        break;
+      }
+      continue;
     }
 
     const category = suitCategory(chosen.suit);
@@ -500,6 +531,10 @@ const report = {
     banked: stats(m.guardBanked),
     wastedOnFade: stats(m.guardWasted),
     fadeEvents: m.guardWasted.length,
+  },
+  feed: {
+    actions: m.feedActions,
+    cardsPerAction: stats(m.feedCardsPerAction),
   },
   lockstep: {
     checksAcrossMultiEnemyGroups: m.lockstepChecks,

@@ -62,7 +62,7 @@ function makeLog(
   return { id: `log-${logCounter++}`, turn, actor, type, message, ...snapshot };
 }
 
-function countPoolSetSize(pool: Card[], suit: SuitId): number {
+export function countPoolSetSize(pool: Card[], suit: SuitId): number {
   return pool.filter((c) => isCreatureCard(c) && c.suit === suit).length;
 }
 
@@ -204,6 +204,28 @@ function isLegalClaim(
     return countPoolSetSize(state.pool, suit) >= MIN_POOL_SET_SIZE;
   }
   return countPoolSetSize(state.pool, suit) >= MIN_POOL_SET_SIZE;
+}
+
+/**
+ * Every suit the player currently holds 1+ matching hand card for and could
+ * legally feed right now (a play remains, suit isn't blocked) -- UI/tooling
+ * helper mirroring getLegalPlayerClaimTargets, but for feeding: no
+ * pool-size floor, since feeding from zero is legal (see isLegalFeed).
+ */
+export function getFeedableSuits(state: CombatState): { suit: SuitId; handCardIds: string[] }[] {
+  if (state.playsRemaining <= 0 && !state.unlimitedPlaysThisTurn) return [];
+  const bySuit = new Map<SuitId, string[]>();
+  for (const card of state.playerHand) {
+    if (card.kind !== 'creature') continue;
+    if (!bySuit.has(card.suit)) bySuit.set(card.suit, []);
+    bySuit.get(card.suit)!.push(card.id);
+  }
+  const result: { suit: SuitId; handCardIds: string[] }[] = [];
+  for (const [suit, handCardIds] of bySuit) {
+    if ((state.blockedSuits[suit] ?? 0) > 0) continue;
+    result.push({ suit, handCardIds });
+  }
+  return result;
 }
 
 /**
