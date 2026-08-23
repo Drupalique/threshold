@@ -7,6 +7,7 @@ export interface RunContextValue {
   startRun: () => void;
   dispatchCombat: (action: CombatAction) => void;
   resolveCombatEnd: () => void;
+  chooseReward: (cardId: string) => void;
   chooseDoor: (doorId: string) => void;
   restart: () => void;
 }

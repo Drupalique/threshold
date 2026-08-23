@@ -11,6 +11,7 @@ import type {
 } from '../types/combat';
 import type { Rng } from './rng';
 import { generateWeightedDeck } from './deckGenerator';
+import { shuffleDeck, drawCards } from './deckState';
 import {
   resolveAddCards,
   resolveBlockSuit,
@@ -23,11 +24,9 @@ import {
   SUIT_DEFINITIONS,
   DECAY_TURNS_N,
   SURPRISE_BLOCK_DURATION_TURNS,
-  HAND_REDRAW_EACH_TURN,
   MIN_POOL_SET_SIZE,
   WEAKEN_PCT_PER_STACK,
   PLAYS_PER_TURN_BASE,
-  QUAKE_CARD_RATIO,
 } from '../config/constants';
 
 const suitCategory = (suit: SuitId) =>
@@ -106,16 +105,25 @@ function updateEnemy(
 
 export function initCombat(
   room: RoomInstance,
-  _rng: Rng,
+  rng: Rng,
   playerHP: number,
   playerHPMax: number,
+  playerDeck: Card[],
 ): CombatState {
   const snapshot: MeterSnapshot = { playerHP, playerHPMax, playerGuard: 0 };
   const enemyList = room.enemies.map((e) => `${e.name} (${e.hp} HP)`).join(', ');
 
+  // Fresh full-deck shuffle at the start of every room (PERSISTENT_DECK_PLAN.md
+  // open question 1) -- run.deck is the persistent content; drawPile/
+  // discardPile below are an ephemeral per-room shuffle of it.
+  const shuffled = shuffleDeck(playerDeck, rng);
+  const { drawn, drawPile, discardPile } = drawCards(shuffled, [], room.params.playerHandSize, rng);
+
   return {
     pool: room.pool,
-    playerHand: room.playerHandDeal,
+    playerHand: drawn,
+    drawPile,
+    discardPile,
     roomParams: room.params,
     enemies: room.enemies,
     activeEnemyIndex: 0,
@@ -132,26 +140,6 @@ export function initCombat(
     log: [makeLog(0, 'system', 'round-start', `Threat looms: ${enemyList}. The pool is set.`, snapshot)],
     status: 'active',
   };
-}
-
-/** Draws a brand new player hand, weighted toward the room's own threat suits. */
-function drawFreshHand(state: CombatState, rng: Rng, idPrefix: string): Card[] {
-  const params = state.roomParams;
-  return generateWeightedDeck(
-    params.playerHandSize,
-    idPrefix,
-    {
-      onSuitTargets: params.threatSuits,
-      onSuitRatio: params.onSuitRatio,
-      boonRatio: params.boonRatio,
-      guardRatio: params.guardRatio,
-      weakenRatio: params.weakenRatio,
-      poisonRatio: params.poisonRatio,
-      strengthRatio: params.strengthRatio,
-      quakeRatio: QUAKE_CARD_RATIO,
-    },
-    rng,
-  );
 }
 
 // --- Claim legality / execution -----------------------------------------
@@ -236,10 +224,19 @@ function performClaim(
   const magnitude = isThreat ? withWeaken(rawMagnitude, state.playerStatuses, WEAKEN_PCT_PER_STACK) : rawMagnitude;
 
   const claimedIdSet = new Set(handCardIds);
+  const claimedCards = state.playerHand.filter((c) => claimedIdSet.has(c.id));
   const nextHand = state.playerHand.filter((c) => !claimedIdSet.has(c.id));
   const nextPool = state.pool.filter((c) => !isCreatureCard(c) || c.suit !== suit);
 
-  let next: CombatState = { ...state, pool: nextPool, playerHand: nextHand };
+  // Claimed hand cards are claimed, not removed from the deck -- they go to
+  // discardPile and come back around next reshuffle, same as an unclaimed
+  // card discarded at turn end (see endTurn's redraw).
+  let next: CombatState = {
+    ...state,
+    pool: nextPool,
+    playerHand: nextHand,
+    discardPile: [...state.discardPile, ...claimedCards],
+  };
 
   let effectDesc: string;
   let enemyName: string | undefined;
@@ -391,8 +388,12 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
         }
         case 'force-discard': {
           const result = resolveForceDiscard(next.playerHand, rng);
-          next = { ...next, playerHand: result.playerHand };
-          message = result.discardedCardId
+          next = {
+            ...next,
+            playerHand: result.playerHand,
+            discardPile: result.discardedCard ? [...next.discardPile, result.discardedCard] : next.discardPile,
+          };
+          message = result.discardedCard
             ? `${enemy.name} forces you to discard a card.`
             : `${enemy.name} tries to force a discard, but your hand is empty.`;
           break;
@@ -590,7 +591,6 @@ function decrementBlocked(blockedSuits: Partial<Record<SuitId, number>>): Partia
 function endTurn(
   state: CombatState,
   rng: Rng,
-  handRedrawEachTurn: boolean = HAND_REDRAW_EACH_TURN,
   // True when a just-resolved PLAYER_CLAIM left the player with more plays
   // this turn (or unlimited plays are active) -- skips the player-turn-end
   // machinery below (status ticks, blocked-suit countdown, the flip to the
@@ -750,28 +750,37 @@ function endTurn(
     };
   }
 
-  // The whole enemy phase just concluded -- hand redraws, control returns to
-  // the player.
+  // The whole enemy phase just concluded -- the whole hand discards and a
+  // fresh one is drawn (Fork 1: full discard & redraw every turn, see
+  // PERSISTENT_DECK_PLAN.md), reshuffling discardPile into a fresh drawPile
+  // mid-draw if it runs dry. Whatever's still unclaimed goes to discardPile
+  // first, same as a claimed card -- it's recoverable next reshuffle, never
+  // just vanishes.
   const newTurnNumber = next.turnNumber + 1;
-  let playerHand = next.playerHand;
-  if (handRedrawEachTurn) {
-    playerHand = drawFreshHand(next, rng, `player-redraw-t${newTurnNumber}`);
-    next = {
-      ...next,
-      log: [
-        ...next.log,
-        makeLog(newTurnNumber, 'system', 'redraw', 'Player draws a fresh hand.', {
-          playerHP: next.playerHP,
-          playerHPMax: next.playerHPMax,
-          playerGuard: next.playerGuard,
-        }),
-      ],
-    };
-  }
+  const preRedrawDiscard = [...next.discardPile, ...next.playerHand];
+  const { drawn, drawPile, discardPile } = drawCards(
+    next.drawPile,
+    preRedrawDiscard,
+    next.roomParams.playerHandSize,
+    rng,
+  );
+  next = {
+    ...next,
+    playerHand: drawn,
+    drawPile,
+    discardPile,
+    log: [
+      ...next.log,
+      makeLog(newTurnNumber, 'system', 'redraw', 'Player draws a fresh hand.', {
+        playerHP: next.playerHP,
+        playerHPMax: next.playerHPMax,
+        playerGuard: next.playerGuard,
+      }),
+    ],
+  };
 
   return {
     ...next,
-    playerHand,
     activeTurn: 'player',
     activeEnemyIndex: 0,
     turnNumber: newTurnNumber,
@@ -785,12 +794,7 @@ function endTurn(
 
 // --- Public action dispatch ------------------------------------------------
 
-export function applyCombatAction(
-  state: CombatState,
-  action: CombatAction,
-  rng: Rng,
-  handRedrawEachTurn: boolean = HAND_REDRAW_EACH_TURN,
-): CombatState {
+export function applyCombatAction(state: CombatState, action: CombatAction, rng: Rng): CombatState {
   if (state.status !== 'active') return state;
 
   if (action.type === 'PLAYER_CLAIM') {
@@ -804,7 +808,7 @@ export function applyCombatAction(
       claimed = { ...claimed, playsRemaining: claimed.playsRemaining - 1 };
     }
     const turnContinues = claimed.unlimitedPlaysThisTurn || claimed.playsRemaining > 0;
-    return endTurn(claimed, rng, handRedrawEachTurn, turnContinues);
+    return endTurn(claimed, rng, turnContinues);
   }
 
   if (action.type === 'PLAYER_PLAY_QUAKE') {
@@ -812,10 +816,14 @@ export function applyCombatAction(
     const card = state.playerHand.find((c) => c.id === action.cardId);
     if (!card || card.kind !== 'quake') return state;
     // A free action -- doesn't spend a play and never ends the turn itself;
-    // only Pass (or running out of plays without this card) does that.
+    // only Pass (or running out of plays without this card) does that. It's
+    // part of the persistent deck now (a reward-pool card, not a hand-only
+    // mint) -- playing it discards it, same as any other played card, so it
+    // comes back around next reshuffle instead of vanishing for the room.
     return {
       ...state,
       playerHand: state.playerHand.filter((c) => c.id !== action.cardId),
+      discardPile: [...state.discardPile, card],
       unlimitedPlaysThisTurn: true,
       log: [
         ...state.log,
@@ -836,13 +844,13 @@ export function applyCombatAction(
       ...state,
       log: [...state.log, makeLog(state.turnNumber, 'player', 'pass', 'Player passes.', snapshotOf(state))],
     };
-    return endTurn(passed, rng, handRedrawEachTurn);
+    return endTurn(passed, rng);
   }
 
   if (action.type === 'ENEMY_TURN') {
     if (state.activeTurn !== 'enemy') return state;
     const resolved = resolveEnemyTurn(state, rng);
-    return endTurn(resolved, rng, handRedrawEachTurn);
+    return endTurn(resolved, rng);
   }
 
   return state;

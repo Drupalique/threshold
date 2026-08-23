@@ -38,14 +38,18 @@ export function resolveBlockSuit(pool: Card[], rng: Rng): SuitId | null {
 
 export interface ForceDiscardResult {
   playerHand: Card[];
-  discardedCardId: string | null;
+  // The card itself, not just its id -- the caller (combatEngine) routes it
+  // into CombatState.discardPile rather than letting it vanish (persistent-
+  // deck design: a force-discard is recoverable via the next reshuffle, not
+  // a permanent exhaust -- see PERSISTENT_DECK_PLAN.md open question 4).
+  discardedCard: Card | null;
 }
 
 export function resolveForceDiscard(playerHand: Card[], rng: Rng): ForceDiscardResult {
   if (playerHand.length === 0) {
-    return { playerHand, discardedCardId: null };
+    return { playerHand, discardedCard: null };
   }
   const idx = rng.int(0, playerHand.length - 1);
-  const discardedCardId = playerHand[idx].id;
-  return { playerHand: playerHand.filter((_, i) => i !== idx), discardedCardId };
+  const discardedCard = playerHand[idx];
+  return { playerHand: playerHand.filter((_, i) => i !== idx), discardedCard };
 }

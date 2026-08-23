@@ -29,5 +29,4 @@ export interface RoomInstance {
   params: RoomParams;
   enemies: EnemyInstance[];
   pool: Card[];
-  playerHandDeal: Card[];
 }

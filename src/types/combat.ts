@@ -27,6 +27,12 @@ export interface LogEntry {
 export interface CombatState {
   pool: Card[];
   playerHand: Card[];
+  // The player's persistent deck (RunState.deck), shuffled and split into
+  // these two piles for this room's combat only -- see engine/deckState.ts.
+  // Claimed/unclaimed/force-discarded cards all route to discardPile, never
+  // vanish; drawPile reshuffles from discardPile when it runs dry.
+  drawPile: Card[];
+  discardPile: Card[];
   roomParams: RoomParams;
   // Alive enemies only, in stable turn order. A defeated enemy is removed
   // immediately (see combatEngine's performClaim), never left at 0 HP.

@@ -9,14 +9,13 @@
 // Usage: npx tsx scripts/playtest.ts <command> [args...]
 // Run `npx tsx scripts/playtest.ts help` for the command list.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseDoor } from '../src/engine/runEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor } from '../src/engine/runEngine.ts';
 import { createRngFromState } from '../src/engine/rng.ts';
 import { getLegalPlayerClaimTargets, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
 import { currentIntent } from '../src/engine/roomIntent.ts';
 import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
 import type { RunState } from '../src/types/run.ts';
 import type { SuitId, SuitCategory } from '../src/types/suits.ts';
-import type { Rng } from '../src/engine/rng.ts';
 
 const STATE_PATH = process.env.PLAYTEST_STATE ?? '.playtest-state.json';
 
@@ -113,7 +112,7 @@ function render(run: RunState, lastLogLength: number) {
     }
 
     lines.push('');
-    lines.push('Your hand:');
+    lines.push(`Your hand (draw pile ${c.drawPile.length}, discard pile ${c.discardPile.length}):`);
     if (c.playerHand.length === 0) lines.push('  (empty)');
     for (const card of c.playerHand) {
       if (card.kind === 'quake') lines.push(`  [${card.id}] QUAKE -- play for unlimited claims this turn`);
@@ -137,6 +136,15 @@ function render(run: RunState, lastLogLength: number) {
     const newEntries = c.log.slice(lastLogLength);
     const toShow = newEntries.length > 0 ? newEntries : c.log.slice(-8);
     for (const entry of toShow) lines.push(`  [t${entry.turn} ${entry.actor}/${entry.type}] ${entry.message}`);
+  }
+
+  if (run.phase === 'reward' && run.rewardOptions) {
+    lines.push('');
+    lines.push(`Choose a reward card (deck size ${run.deck.length}):`);
+    run.rewardOptions.forEach((card, i) => {
+      const desc = card.kind === 'quake' ? 'QUAKE -- unlimited claims for a turn' : `${card.suit} (${suitCategory(card.suit)})`;
+      lines.push(`  [${i}] [${card.id}] ${desc}`);
+    });
   }
 
   if (run.phase === 'door-choice' && run.currentDoors) {
@@ -222,6 +230,29 @@ switch (cmd) {
     break;
   }
 
+  case 'reward': {
+    const [indexRaw] = args;
+    if (!indexRaw) {
+      console.log('Usage: reward <cardIndex>');
+      process.exit(1);
+    }
+    const { run } = load();
+    if (run.phase !== 'reward' || !run.rewardOptions) {
+      console.log('Not currently at a reward choice.');
+      process.exit(1);
+    }
+    const index = Number(indexRaw);
+    const chosen = run.rewardOptions[index];
+    if (!chosen) {
+      console.log(`No reward option at index ${indexRaw}.`);
+      process.exit(1);
+    }
+    const next = chooseReward(run, chosen.id);
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
   case 'door': {
     const [doorId] = args;
     if (!doorId) {
@@ -245,6 +276,7 @@ Commands:
   claim <suit> <id,id,...> [targetId]     claim a pool set with these hand cards
   pass                                    end your turn without claiming
   quake <cardId>                          play a Quake card (unlimited claims this turn)
+  reward <cardIndex>                      pick a reward card (0-2) after clearing a room, before the door choice
   door <doorId>                           pick a door after clearing a room
   help                                    this message
 

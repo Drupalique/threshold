@@ -202,6 +202,8 @@ export function CombatScreen() {
             selectedIds={selectedIds}
             disabled={!canAct}
             onCardClick={handleCardClick}
+            drawPileCount={combat.drawPile.length}
+            discardPileCount={combat.discardPile.length}
           />
           {combat.status === 'active' && (
             <ClaimControls

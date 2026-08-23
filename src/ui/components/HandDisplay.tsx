@@ -6,12 +6,19 @@ interface HandDisplayProps {
   selectedIds: Set<string>;
   disabled: boolean;
   onCardClick: (card: Card) => void;
+  drawPileCount: number;
+  discardPileCount: number;
 }
 
-export function HandDisplay({ hand, selectedIds, disabled, onCardClick }: HandDisplayProps) {
+export function HandDisplay({ hand, selectedIds, disabled, onCardClick, drawPileCount, discardPileCount }: HandDisplayProps) {
   return (
     <div className="hand-display">
-      <h3>Your Hand</h3>
+      <div className="hand-display-header">
+        <h3>Your Hand</h3>
+        <span className="hand-pile-counts">
+          Draw {drawPileCount} / Discard {discardPileCount}
+        </span>
+      </div>
       <div className="hand-cards">
         {hand.map((card) => (
           <CardChip

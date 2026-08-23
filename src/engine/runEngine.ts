@@ -5,7 +5,8 @@ import { createRng } from './rng';
 import { generateRoom } from './roomGenerator';
 import { generateDoorPair } from './doorGenerator';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
-import { PLAYER_HP_MAX, RUN_MAX_DEPTH } from '../config/constants';
+import { generateRewardOptions } from './rewardGenerator';
+import { PLAYER_HP_MAX, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
 
 export function createNewRun(seed: number): RunState {
   return {
@@ -16,6 +17,8 @@ export function createNewRun(seed: number): RunState {
     playerHP: PLAYER_HP_MAX,
     playerHPMax: PLAYER_HP_MAX,
     phase: 'start',
+    deck: [...STARTER_DECK],
+    rewardOptions: null,
     branchRoots: {},
     currentBranchRootId: null,
     currentDoors: null,
@@ -26,7 +29,7 @@ export function createNewRun(seed: number): RunState {
 export function startFirstRoom(run: RunState): RunState {
   const room = generateRoom(run.rng, run.depth + 1);
   const branchRoot: BranchRoot = { id: `branch-${room.id}`, depth: 1, room };
-  const combat = initCombat(room, run.rng, run.playerHP, run.playerHPMax);
+  const combat = initCombat(room, run.rng, run.playerHP, run.playerHPMax, run.deck);
   return {
     ...run,
     phase: 'combat',
@@ -50,7 +53,13 @@ export function applyCombatAction(run: RunState, action: CombatAction): RunState
   return { ...run, combat: nextCombat, playerHP: nextCombat.playerHP };
 }
 
-/** Advances the run phase once `run.combat.status` is no longer 'active'. */
+/**
+ * Advances the run phase once `run.combat.status` is no longer 'active'. A
+ * cleared room goes to the 'reward' phase (chooseReward below advances it to
+ * door-choice from there) rather than straight to door generation -- unless
+ * this was the run's last room, in which case there's nothing left to
+ * reward for.
+ */
 export function resolveCombatEnd(run: RunState): RunState {
   if (!run.combat || run.phase !== 'combat' || run.combat.status === 'active') return run;
 
@@ -65,19 +74,33 @@ export function resolveCombatEnd(run: RunState): RunState {
     return { ...run, depth: newDepth, phase: 'run-complete' };
   }
 
-  const { doors, branchRoots } = generateDoorPair(run.rng, newDepth + 1);
+  const rewardOptions = generateRewardOptions(newDepth, run.rng);
+  return { ...run, depth: newDepth, phase: 'reward', rewardOptions };
+}
+
+/** Shared tail for both chooseReward and (in principle) any other reward-phase exit -- generates the next door pair. */
+function proceedToDoors(run: RunState): RunState {
+  const { doors, branchRoots } = generateDoorPair(run.rng, run.depth + 1);
   const branchRootMap = { ...run.branchRoots };
   if (run.currentBranchRootId) delete branchRootMap[run.currentBranchRootId];
   for (const br of branchRoots) branchRootMap[br.id] = br;
 
   return {
     ...run,
-    depth: newDepth,
     phase: 'door-choice',
     branchRoots: branchRootMap,
     currentDoors: doors,
     currentBranchRootId: null,
   };
+}
+
+/** Appends the chosen reward card to the persistent deck, then proceeds to door generation. */
+export function chooseReward(run: RunState, cardId: string): RunState {
+  if (run.phase !== 'reward' || !run.rewardOptions) return run;
+  const chosen = run.rewardOptions.find((c) => c.id === cardId);
+  if (!chosen) return run;
+
+  return proceedToDoors({ ...run, deck: [...run.deck, chosen], rewardOptions: null });
 }
 
 export function chooseDoor(run: RunState, doorId: string): RunState {
@@ -90,7 +113,7 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
   // Only the chosen branch root survives -- the unchosen door and its
   // subtree are discarded, making "no backtracking, no preview" structural.
   const branchRootMap: Record<string, BranchRoot> = { [branchRoot.id]: branchRoot };
-  const combat = initCombat(branchRoot.room, run.rng, run.playerHP, run.playerHPMax);
+  const combat = initCombat(branchRoot.room, run.rng, run.playerHP, run.playerHPMax, run.deck);
 
   return {
     ...run,

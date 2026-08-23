@@ -1,6 +1,7 @@
 import type { SuitDef, SuitId } from '../types/suits';
 import type { DoorColor } from '../types/door';
 import type { PoolSizeBand } from '../types/room';
+import type { Card } from '../types/cards';
 
 // --- Content data -----------------------------------------------------
 
@@ -67,11 +68,6 @@ export const SUIT_COLOR_FAMILY: Record<SuitId, DoorColor | null> = {
 
 export const PLAYER_HAND_SIZE = 5;
 
-// Experimental variant, not in the v0.2 design doc (which specifies hands
-// dealt once at round start and only shrinking -- see 4.1/4.3). When true,
-// the player gets a brand new hand at the start of each of their turns.
-export const HAND_REDRAW_EACH_TURN = true;
-
 export const ROOM_POOL_SIZE_SMALL: [number, number] = [6, 8];
 export const ROOM_POOL_SIZE_LARGE: [number, number] = [12, 16];
 
@@ -133,14 +129,6 @@ export const SURPRISE_BLOCK_DURATION_TURNS = 1;
 // effect (see CombatState.unlimitedPlaysThisTurn).
 export const PLAYS_PER_TURN_BASE = 2;
 
-// Odds a freshly drawn hand card (initial deal or a turn's redraw) is a
-// Quake card instead of an ordinary suited one -- deliberately rarer than
-// every suit ratio above, since unlimited plays for a turn is the single
-// strongest thing a card can do. Hand-only: never rolled into the pool (see
-// roomGenerator/combatEngine's drawFreshHand, the only two call sites that
-// pass it to generateWeightedDeck).
-export const QUAKE_CARD_RATIO = 0.03;
-
 // --- Status effects ---------------------------------------------------
 // Weaken/Strength/Poison are stack counts that decay by 1 per holder turn
 // (see engine/statusEffects.ts). Strength and Poison convert 1:1 into flat
@@ -152,9 +140,46 @@ export const WEAKEN_PCT_PER_STACK = 0.1;
 
 export const DOOR_CORRELATION_RATE = 0.75;
 
-// --- Run --------------------------------------------------------------
+// --- Run / persistent deck ----------------------------------------------
 
 export const RUN_MAX_DEPTH = 10;
+
+// The run's starting deck (PERSISTENT_DECK_PLAN.md open question 5's
+// strawman) -- 19 cards, weighted toward the four threat suits with a light
+// scattering of every support suit so an early room almost always has
+// *something* live to claim. A balance surface like every ratio constant
+// above; expect to retune after Phase 5 batch-sim data, not before.
+function starterCopies(suit: SuitId, count: number): Card[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `starter-${suit}-${i}`,
+    kind: 'creature' as const,
+    suit,
+  }));
+}
+
+export const STARTER_DECK: Card[] = [
+  ...starterCopies('wolf', 3),
+  ...starterCopies('ember', 3),
+  ...starterCopies('rot', 3),
+  ...starterCopies('spider', 3),
+  ...starterCopies('grace', 2),
+  ...starterCopies('ward', 2),
+  ...starterCopies('hex', 1),
+  ...starterCopies('venom', 1),
+  ...starterCopies('vigor', 1),
+];
+
+// --- Rewards ------------------------------------------------------------
+
+// Odds a reward offer's slot is a Quake card instead of an ordinary suited
+// one (PERSISTENT_DECK_PLAN.md open question 3: Quake moved out of hand
+// generation entirely and lives here now) -- deliberately rarer than an
+// ordinary suit pick, since unlimited plays for a turn is the single
+// strongest thing a card can do, and it's now a permanent deck addition
+// rather than a one-turn-only mint.
+export const QUAKE_REWARD_RATIO = 0.08;
+
+export const REWARD_OPTION_COUNT = 3;
 
 // --- UI pacing only (not engine) --------------------------------------
 

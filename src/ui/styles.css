@@ -358,6 +358,17 @@ button {
 
 /* --- Hand --- */
 
+.hand-display-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.hand-pile-counts {
+  color: #999;
+  font-size: 0.85rem;
+}
+
 .hand-cards {
   display: flex;
   gap: 0.5rem;
@@ -439,6 +450,31 @@ button {
 .log-entry--system {
   border-left: 3px solid #7f8c8d;
   color: #bbb;
+}
+
+/* --- Reward --- */
+
+.reward-screen {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.reward-choices {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.reward-choice .card-chip {
+  min-width: 120px;
+  padding: 1rem;
+  font-size: 1.05rem;
+}
+
+.reward-deck-size {
+  color: #999;
+  margin-top: 2rem;
 }
 
 /* --- Doors --- */

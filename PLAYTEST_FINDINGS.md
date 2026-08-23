@@ -16,16 +16,24 @@ Two tools now exist for playing THRESHOLD without the UI, straight against
   or an agent to actually play a room and give qualitative impressions. This
   is how the single-room, seed-777, "died to a 3x Wolf-kin room" playthrough
   earlier in this session was produced.
-- **`scripts/playtest-sim.ts`** -- a batch simulator: a heuristic bot plays
-  full 10-room runs start to finish, and the run instruments outcomes for
+- **`scripts/playtest-sim.ts`** -- a batch simulator: a bot plays full
+  10-room runs start to finish, and the run instruments outcomes for
   statistical questions a single playthrough can't answer. This document is
-  built from that tool, run at `n=500` seeds (1-500) under two different bot
-  profiles (see Caveats).
+  built from that tool. Two player-turn decision-makers are available via
+  `PLAYTEST_BOT`:
+  - `heuristic` (default) -- a hand-scored greedy function (`pickBestClaim`),
+    run at `n=500` seeds (1-500) under two different weighting profiles (see
+    Caveats). Most of this document is built from this mode.
+  - `llm` -- combat claim/pass decisions go through Claude (Haiku 4.5, via
+    `scripts/llmBot.ts`) instead of the scoring function; reward and door
+    choices stay on the heuristic pickers regardless. See the 2026-08-23
+    "agentic cross-check" addendum below for what this was used to confirm.
 
 Reproduce with:
 ```
 npx tsx scripts/playtest-sim.ts 500 1                       # aggro profile
 PLAYTEST_PROFILE=defensive npx tsx scripts/playtest-sim.ts 500 1
+PLAYTEST_BOT=llm npx tsx scripts/playtest-sim.ts 25 1        # requires ANTHROPIC_API_KEY
 ```
 
 ### Bot policy (and its limits)
@@ -200,3 +208,209 @@ trying next, roughly in order of likely impact:
 - All numbers are tied to the current constants; treat this document as a
   snapshot, not a standing spec, per the design doc's own framing of
   "settled enough to build first."
+
+## Addendum, 2026-08-23 -- persistent player deck (PERSISTENT_DECK_PLAN.md), Phase 5 revalidation
+
+`PERSISTENT_DECK_PLAN.md` was implemented in response to Finding 2 above: the
+player's hand no longer regenerates from the current room's own threat
+suits every turn; it's dealt from a persistent, run-level deck (19-card
+starter, `STARTER_DECK` in `constants.ts`) that only grows via a 1-of-3
+reward pick after each cleared room, reshuffled fresh into a per-room
+draw/discard pile at the start of every room. Re-ran the exact same
+`playtest-sim.ts` harness at the same scale (n=500, seeds 1-500, aggro and
+defensive profiles), extended with a `pickReward` heuristic (prefer
+whichever offered suit already has the most live copies in the deck --
+doors don't signal reward suits yet, so this is the only signal available
+to the bot). Full config unchanged (`DECAY_TURNS_N=3`, `ON_SUIT_RATIO=0.45`,
+etc.).
+
+**Caveat on comparability**: `roomGenerator.ts`'s pool/enemy generation was
+deliberately left untouched by the plan, but removing the old per-room hand
+roll changes how many RNG draws happen before pool/enemy generation for
+every room after the first, which shifts *which* rooms/enemies a given seed
+produces relative to the original dataset. This is not a perfectly
+controlled A/B on that axis. It doesn't explain the results below, though:
+the mechanism is directly traceable (see Finding 7), and the aggro/defensive
+profiles agree closely with each other in this dataset just as they did in
+the original one, which is the same cross-check the original findings used
+to rule out "bot skill" as the explanation for Finding 1 -- it rules out
+"bot skill" here too, leaving the deck/suit-matching mechanism as the
+remaining explanation.
+
+### Headline results (n=500 runs per profile, seeds 1-500)
+
+| | Aggro (before &rarr; after) | Defensive (before &rarr; after) |
+|---|---|---|
+| Runs completed (reached depth 10) | 0/500 &rarr; 0/500 | 0/500 &rarr; 0/500 |
+| Avg depth reached (of 10) | 1.24 &rarr; **0.66** | ~1.2 &rarr; **0.66** |
+| Dead-hand turn rate | 52.5% &rarr; **52.3%** | 52.5%\* &rarr; **52.7%** |
+
+\*Original doc reported one combined 52.5% figure across both profiles, not
+split; treated as the baseline for both rows here.
+
+**Finding 2's target metric did not move.** The dead-hand rate is
+statistically unchanged (52.3-52.7% vs. 52.5%). Worse, **average depth
+reached fell by almost half** (1.2 &rarr; 0.66) -- the change this plan was
+built to improve survivability made it measurably worse on this dataset.
+
+### Finding 7 -- Exact-suit-matching against a suit-diverse persistent deck under-supplies exactly the suits a given room needs, and the reward bot doesn't yet compensate
+
+Room clear rate by enemy count, this dataset vs. the original (aggro; defensive matched within 1-2 points):
+
+| Enemies in room | Before | After (aggro) | After (defensive) |
+|---|---|---|---|
+| 1 | 91.4% | **82.9%** | 83.6% |
+| 2 | 60.6% | **32.3%** | 31.9% |
+| 3 | 10.4% | **1.1%** | 1.5% |
+
+Every band got worse, and the 2-enemy band's clear rate roughly halved. The
+multiplicative "big spike" also shrank sharply -- claims dealing 8+ damage
+fell from 33.9% to **13.6%** (aggro) / 13.9% (defensive) of all threat
+claims, and 12+ from 15.4% to **2.4%** / 2.7% (`bigThreatSpikes` in the raw
+output) -- while decay's average-enemies-present (1.62, was 1.61) and the
+lockstep check (0 violations, unchanged) stayed exactly where Finding 3/4
+left them, confirming claim resolution itself wasn't touched and the effect
+is isolated to hand/claim supply, as the plan intended when it said pool
+generation and claim resolution were both out of scope.
+
+**Mechanism**: `STARTER_DECK` spreads its 19 cards across all 9 suits (3
+each of the 4 threat suits, lighter elsewhere), but a room's pool only ever
+draws from 1-2 of those 4 threat suits (`THREAT_SUIT_COUNT_BY_SIZE_BAND`).
+Under the old room-generated hand, every hand card was weighted toward
+*this room's* actual threat suits by construction. Under the persistent
+deck, a 5-card hand drawn from a 19-card, 9-suit deck usually holds cards
+for suits this room's pool doesn't even contain, on top of Fork 2's already
+known exact-suit-matching risk -- and because claim magnitude is `pool set
+size x hand cards played`, fewer *same-suit* cards per hand doesn't just
+mean fewer legal claims, it means smaller claims when one does land, which
+is exactly what the big-spike drop shows.
+
+**This is precisely the risk PERSISTENT_DECK_PLAN.md's Fork 2 flagged as
+needing empirical measurement, not assumed away** -- the plan's proposed
+compensating mechanism (make the door-signal system, `SUIT_COLOR_FAMILY`,
+give reward/door choices real teeth) is explicitly **not yet wired up**:
+`pickReward` in `playtest-sim.ts` only looks at the player's own deck
+composition, never at door signals or the upcoming room's threat suits,
+because nothing in the current build exposes "what suits does the next
+room favor" as a decision input yet. This dataset measures the persistent
+deck with that compensating half of the design still missing, not the
+design's intended end state.
+
+### What this suggests, roughly in order of likely impact
+
+1. **This isn't a finished result** -- it's a measurement of half a design.
+   The plan's own Fork 2 discussion anticipated exactly this gap and named
+   the fix (door/reward suit signaling); that follow-up work should happen
+   before drawing a final verdict on the persistent-deck direction.
+2. **`STARTER_DECK`'s composition is a likely lever** even before door
+   signaling lands -- fewer suits or more copies per threat suit (e.g. 2
+   threat suits x 5 copies instead of 4 x 3) would raise the odds a 5-card
+   hand actually clusters on one suit, directly targeting the big-spike
+   drop.
+3. **Re-run this exact comparison once door/reward suit signaling exists**
+   -- the current numbers are a legitimate baseline for that follow-up, not
+   a verdict on the persistent-deck idea itself.
+
+### Guard and decay, for completeness (unaffected, as expected)
+
+Guard fade rate ticked down (54% of claims wasted before &rarr; 44.0%
+aggro / 40.1% defensive), consistent with fewer total claims happening
+before death, not a mechanic change -- `performClaim`/`tickDecay` were
+untouched by this plan and the raw wasted/banked averages per claim are
+within noise of the original (banked ~1.6-1.7, wasted ~1.85-1.9 both
+before and after).
+
+## Addendum, 2026-08-23 -- agentic cross-check: does a real LLM play differently than the heuristic bot?
+
+Every finding above, including the persistent-deck addendum, rests on one
+decision-maker: `pickBestClaim`, a hand-tuned scoring function. The
+aggro/defensive weight comparison rules out *that function's specific
+weights* as the explanation for a result, but it can't rule out "heuristic
+scoring bots in general miss something a real reasoning agent would catch."
+To close that gap, `scripts/playtest-sim.ts` gained a third decision-maker:
+`PLAYTEST_BOT=llm` routes every combat claim/pass decision through Claude
+(Haiku 4.5, chosen as a cheap/fast tier) instead of the scoring function.
+Each decision is a single forced tool call (`choose_action`) against a
+pre-filtered list of legal claim options the engine already computed
+(`getLegalPlayerClaimTargets`) -- the model picks an option index or
+"pass," and never has to reconstruct suit-matching/targeting legality
+itself. Reward and door choices are unchanged (`pickReward`/`pickDoor`,
+still heuristic) -- this only replaces the per-turn claim decision. See
+`scripts/llmBot.ts` for the prompt/tool definition.
+
+**Validation, not a new statistical claim.** Three runs at increasing scale
+(n=1, n=10, n=25, all starting at seed 1 -- each later run's seed range
+strictly contains the earlier ones', so treat n=25 as the dataset, not
+1+10+25=36 independent samples) confirmed the harness itself works before
+trusting any numbers from it: **0 fallback-to-pass events across 418 total
+API calls** (14 + 124 + 280) -- every single tool call returned a
+parseable, in-range choice. Reasoning text read as genuinely
+situation-aware, not templated: it consistently focus-fired the lower-HP
+enemy of a pair, finished off nearly-dead enemies before switching targets,
+and reached for Grace/Ward specifically when HP dropped into the
+single digits -- e.g. *"With very low HP (5/30), claiming Grace to heal
+myself is critical for survival before dealing with the Ember Wretch
+threat."*
+
+### Head-to-head, same 25 seeds, same room/enemy generation
+
+Ran the heuristic (aggro) bot over the identical seed range (1-25) for a
+matched comparison -- both bots faced literally the same rooms, pools, and
+enemies, only the claim/pass decision differs:
+
+| | Heuristic (aggro) | LLM (Haiku 4.5) |
+|---|---|---|
+| Avg depth reached (of 10) | 0.56 | 0.52 |
+| Dead-hand turn rate | 58.0% | 57.8% |
+| Death causes | attack 22, decay 3 | attack 23, decay 2 |
+| Big threat spikes (8+ dmg / 12+ dmg, of threat claims) | 14/126 (11.1%) / 2/126 (1.6%) | 14/123 (11.4%) / 2/123 (1.6%) |
+| Guard banked (avg) / wasted on fade (avg) | 1.41 / 1.39 | 1.26 / 1.29 |
+| Clear rate, 1-enemy rooms | 71.4% (10/14) | 71.4% (10/14) |
+| Clear rate, 2-enemy rooms | 30.8% (4/13) | 23.1% (3/13) |
+| Clear rate, 3-enemy rooms | 0% (0/12) | 0% (0/11) |
+
+**The two decision-makers are statistically indistinguishable on this
+sample.** Every metric lands within a couple of percentage points or a
+single event of the other, including the 1-enemy clear rate matching
+*exactly*. This is a materially stronger check than the aggro/defensive
+weight comparison the original findings relied on: those two profiles are
+still the same scoring function with different coefficients, so agreement
+between them only rules out "the specific weights are the problem." A
+from-scratch, natural-language-reasoning agent landing on the same
+survival curve rules out "heuristic-bot-shaped blind spots" as the
+explanation too.
+
+**What this confirms about the earlier findings:** Finding 1's enemy-count
+lethality cliff (1-enemy rooms clear roughly 5-7x more often than 3-enemy
+rooms, in both this dataset and the original n=500 one) and the persistent-
+deck addendum's Finding 7 (dead-hand rate parked at ~52-58% regardless of
+who's playing) are not artifacts of a specific bot's scoring quirks. Three
+qualitatively different players -- two tunings of a greedy scorer, and an
+LLM reasoning per-turn in prose -- converge on the same shape. That raises
+the confidence that these are structural properties of the current tuning
+(flat 1-3 enemy count with no depth scaling; a suit-diverse persistent deck
+under-supplying a room's specific 1-2 threat suits), not a "better play
+would fix it" gap.
+
+### Caveats
+
+- **n=25 vs. the n=500 heuristic baseline.** This is a directional
+  cross-check, not a like-for-like statistical comparison -- treat the
+  table above as "these two agree closely on a shared sample," not as a
+  standalone n=25 result to cite on its own.
+- **One LLM "profile."** No aggro/defensive-style variant was run for the
+  LLM bot; unclear whether prompting it toward a specific playstyle would
+  shift results the way the heuristic's profiles didn't.
+- **Reward/door choices are still heuristic even in `PLAYTEST_BOT=llm`
+  mode.** This cross-check says nothing about whether an LLM would engage
+  with the persistent-deck addendum's missing "door/reward suit signaling"
+  compensation any better than `pickReward`'s simple deck-count heuristic
+  does -- that's a distinct, not-yet-tested question.
+- **Sequential API calls.** Each decision is one real network round-trip
+  (~1.4s/call observed); n=25 (280 calls) took ~6.5 minutes wall-clock.
+  Scaling this to n=500 for a true apples-to-apples sample against the
+  heuristic baseline would take roughly two hours sequentially -- worth
+  parallelizing before attempting it.
+- **Cost was trivial** at Haiku 4.5 pricing (order of $0.30 across all
+  three validation runs combined, by rough estimate -- exact token usage
+  isn't logged yet).

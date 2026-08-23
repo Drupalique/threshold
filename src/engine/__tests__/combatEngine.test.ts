@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '../rng';
+import type { Rng } from '../rng';
 import { initCombat, applyCombatAction, getLegalPlayerClaimTargets } from '../combatEngine';
 import type { RoomInstance } from '../../types/room';
 import type { EnemyInstance } from '../../types/enemy';
 import type { CombatState } from '../../types/combat';
 import type { Card } from '../../types/cards';
 import { isCreatureCard } from '../../types/cards';
+import type { SuitId } from '../../types/suits';
 import {
   SURPRISE_ADD_CARDS_COUNT,
   SURPRISE_BLOCK_DURATION_TURNS,
@@ -50,13 +52,42 @@ function makeRoom(overrides: Partial<RoomInstance> = {}): RoomInstance {
       { id: 'p3', kind: 'creature', suit: 'wolf' },
       { id: 'p4', kind: 'creature', suit: 'wolf' },
     ],
-    playerHandDeal: [
-      { id: 'ph1', kind: 'creature', suit: 'wolf' },
-      { id: 'ph2', kind: 'creature', suit: 'wolf' },
-      { id: 'ph3', kind: 'creature', suit: 'wolf' },
-    ],
     ...overrides,
   };
+}
+
+// --- persistent-deck test helpers ---------------------------------------
+// The pool/enemies stay room-authored (via makeRoom above), but the hand no
+// longer comes from RoomInstance -- it's a slice of the player's shuffled
+// persistent deck (see PERSISTENT_DECK_PLAN.md). Most tests below don't
+// care about deck contents at all, only about a specific starting hand to
+// drive a specific claim -- makeCombat covers that by initializing through
+// the real deck/shuffle machinery (so drawPile/discardPile stay internally
+// consistent) and then overwriting playerHand directly, exactly as many
+// tests already hack other CombatState fields (activeTurn, statuses,
+// decayCounters) to jump straight to the scenario under test.
+
+function makeDeck(suit: SuitId, count: number, prefix = 'deck'): Card[] {
+  return Array.from({ length: count }, (_, i) => ({ id: `${prefix}-${suit}-${i}`, kind: 'creature' as const, suit }));
+}
+
+const DEFAULT_DECK: Card[] = makeDeck('wolf', 12);
+
+const DEFAULT_HAND: Card[] = [
+  { id: 'ph1', kind: 'creature', suit: 'wolf' },
+  { id: 'ph2', kind: 'creature', suit: 'wolf' },
+  { id: 'ph3', kind: 'creature', suit: 'wolf' },
+];
+
+function makeCombat(
+  room: RoomInstance,
+  rng: Rng,
+  playerHP: number,
+  playerHPMax: number,
+  hand: Card[] = DEFAULT_HAND,
+  deck: Card[] = DEFAULT_DECK,
+): CombatState {
+  return { ...initCombat(room, rng, playerHP, playerHPMax, deck), playerHand: hand };
 }
 
 describe('claim magnitude', () => {
@@ -72,7 +103,7 @@ describe('claim magnitude', () => {
       ],
     });
     const rng = createRng(1);
-    const state = initCombat(room, rng, 30, 30);
+    const state = makeCombat(room, rng, 30, 30);
 
     const next = applyCombatAction(
       state,
@@ -95,15 +126,13 @@ describe('claim magnitude', () => {
         { id: 'p3', kind: 'creature', suit: 'wolf' },
         { id: 'p4', kind: 'creature', suit: 'wolf' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
     });
     const rng = createRng(1);
-    const state = initCombat(room, rng, 30, 30);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
     const next = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
-      false,
     );
 
     expect(next.enemies).toEqual([]);
@@ -118,20 +147,18 @@ describe('plays per turn', () => {
         { id: 'p1', kind: 'creature', suit: 'wolf' },
         { id: 'p2', kind: 'creature', suit: 'rot' },
       ],
-      playerHandDeal: [
-        { id: 'ph1', kind: 'creature', suit: 'wolf' },
-        { id: 'ph2', kind: 'creature', suit: 'rot' },
-      ],
     });
     const rng = createRng(31);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [
+      { id: 'ph1', kind: 'creature', suit: 'wolf' },
+      { id: 'ph2', kind: 'creature', suit: 'rot' },
+    ]);
     expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE);
 
     state = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
-      false,
     );
     expect(state.activeTurn).toBe('player'); // first of two plays -- turn continues
     expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE - 1);
@@ -141,7 +168,6 @@ describe('plays per turn', () => {
       state,
       { type: 'PLAYER_CLAIM', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph2'] },
       rng,
-      false,
     );
     expect(state.enemies[0].hp).toBe(20 - 2); // second claim still resolved
     expect(state.activeTurn).toBe('enemy'); // plays exhausted -- turn actually ends now
@@ -154,25 +180,22 @@ describe('plays per turn', () => {
         { id: 'p2', kind: 'creature', suit: 'rot' },
         { id: 'p3', kind: 'creature', suit: 'ember' },
       ],
-      playerHandDeal: [
-        { id: 'ph1', kind: 'creature', suit: 'wolf' },
-        { id: 'ph2', kind: 'creature', suit: 'rot' },
-        { id: 'ph3', kind: 'creature', suit: 'ember' },
-      ],
     });
     const rng = createRng(32);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [
+      { id: 'ph1', kind: 'creature', suit: 'wolf' },
+      { id: 'ph2', kind: 'creature', suit: 'rot' },
+      { id: 'ph3', kind: 'creature', suit: 'ember' },
+    ]);
     state = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
-      false,
     );
     state = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph2'] },
       rng,
-      false,
     );
     expect(state.playsRemaining).toBe(0);
     expect(state.activeTurn).toBe('enemy'); // second claim already ended the turn
@@ -185,7 +208,6 @@ describe('plays per turn', () => {
       state,
       { type: 'PLAYER_CLAIM', suit: 'ember', targetInstanceId: 'e1', handCardIds: ['ph3'] },
       rng,
-      false,
     );
     expect(rejected).toBe(state); // illegal claim, state unchanged
   });
@@ -197,20 +219,20 @@ describe('plays per turn', () => {
         { id: 'p2', kind: 'creature', suit: 'rot' },
         { id: 'p3', kind: 'creature', suit: 'ember' },
       ],
-      playerHandDeal: [
-        { id: 'phq', kind: 'quake' },
-        { id: 'ph1', kind: 'creature', suit: 'wolf' },
-        { id: 'ph2', kind: 'creature', suit: 'rot' },
-        { id: 'ph3', kind: 'creature', suit: 'ember' },
-      ],
     });
     const rng = createRng(33);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [
+      { id: 'phq', kind: 'quake' },
+      { id: 'ph1', kind: 'creature', suit: 'wolf' },
+      { id: 'ph2', kind: 'creature', suit: 'rot' },
+      { id: 'ph3', kind: 'creature', suit: 'ember' },
+    ]);
 
-    state = applyCombatAction(state, { type: 'PLAYER_PLAY_QUAKE', cardId: 'phq' }, rng, false);
+    state = applyCombatAction(state, { type: 'PLAYER_PLAY_QUAKE', cardId: 'phq' }, rng);
     expect(state.unlimitedPlaysThisTurn).toBe(true);
     expect(state.activeTurn).toBe('player'); // playing it doesn't end the turn
     expect(state.playerHand.some((c) => c.id === 'phq')).toBe(false); // consumed
+    expect(state.discardPile.some((c) => c.id === 'phq')).toBe(true); // discarded, not vanished -- recoverable next reshuffle
     expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE); // untouched -- it isn't spent, it's bypassed
 
     // Three claims in a row -- more than PLAYS_PER_TURN_BASE would normally allow.
@@ -218,27 +240,24 @@ describe('plays per turn', () => {
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
-      false,
     );
     expect(state.activeTurn).toBe('player');
     state = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph2'] },
       rng,
-      false,
     );
     expect(state.activeTurn).toBe('player');
     state = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'ember', targetInstanceId: 'e1', handCardIds: ['ph3'] },
       rng,
-      false,
     );
     expect(state.activeTurn).toBe('player'); // still going -- unlimited
     expect(state.enemies[0].hp).toBe(20 - 3);
 
     // Only Pass actually ends a Quake-boosted turn.
-    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
     expect(state.activeTurn).toBe('enemy');
     expect(state.unlimitedPlaysThisTurn).toBe(false); // cleared once the turn actually ends
   });
@@ -260,13 +279,12 @@ describe('pool piles are independent of any specific enemy (design doc 4.8)', ()
         // the "the whole pile is gone" assertion.
         { id: 'p6', kind: 'creature', suit: 'rot' },
       ],
-      playerHandDeal: [
-        { id: 'ph1', kind: 'creature', suit: 'wolf' },
-        { id: 'ph2', kind: 'creature', suit: 'wolf' },
-      ],
     });
     const rng = createRng(2);
-    const state = initCombat(room, rng, 30, 30);
+    const state = makeCombat(room, rng, 30, 30, [
+      { id: 'ph1', kind: 'creature', suit: 'wolf' },
+      { id: 'ph2', kind: 'creature', suit: 'wolf' },
+    ]);
 
     // Both alive enemies are offered as targets for the very same pile,
     // with the identical pool set size -- there is no "owning" enemy.
@@ -278,7 +296,6 @@ describe('pool piles are independent of any specific enemy (design doc 4.8)', ()
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e2', handCardIds: ['ph1', 'ph2'] },
       rng,
-      false,
     );
 
     const e1 = next.enemies.find((e) => e.instanceId === 'e1');
@@ -293,10 +310,10 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
   it('attack damages the player and advances the pattern index', () => {
     const room = makeRoom({ enemies: [makeEnemy({ patternIndex: 0 })] }); // wolf-kin[0] = attack 4
     const rng = createRng(3);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     expect(next.playerHP).toBe(30 - 4);
     expect(next.enemies[0].patternIndex).toBe(1);
@@ -311,23 +328,30 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
         { id: 'p2', kind: 'creature', suit: 'wolf' },
         { id: 'p3', kind: 'creature', suit: 'wolf' },
       ],
-      playerHandDeal: [
+    });
+    const rng = createRng(4);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
+    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+    expect(state.enemies[0].guard).toBe(6);
+
+    // This room has one enemy, so that ENEMY_TURN just concluded the whole
+    // round and redrew the hand from the deck -- force the specific
+    // matching hand this claim needs, same as any other CombatState field
+    // this suite hacks directly to reach a scenario.
+    state = {
+      ...state,
+      playerHand: [
         { id: 'ph1', kind: 'creature', suit: 'wolf' },
         { id: 'ph2', kind: 'creature', suit: 'wolf' },
       ],
-    });
-    const rng = createRng(4);
-    let state: CombatState = initCombat(room, rng, 30, 30);
-    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
-    expect(state.enemies[0].guard).toBe(6);
+    };
 
     // pool set size 3 x 2 hand cards = 6; Guard absorbs all 6, none gets through
     const next = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
-      false,
     );
     expect(next.enemies[0].hp).toBe(20);
     expect(next.enemies[0].guard).toBe(0);
@@ -338,10 +362,10 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
       enemies: [makeEnemy({ defId: 'rot-husk', name: 'Rot Husk', hp: 16, hpMax: 18, patternIndex: 2 })], // rot-husk[2] = heal 4
     });
     const rng = createRng(5);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(next.enemies[0].hp).toBe(18); // capped, not 20
   });
 
@@ -354,30 +378,36 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
         { id: 'p3', kind: 'creature', suit: 'rot' },
         { id: 'p4', kind: 'creature', suit: 'rot' },
       ],
-      playerHandDeal: [
+    });
+    const rng = createRng(6);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
+    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+    expect(state.playerStatuses.weaken).toBe(3);
+
+    // One enemy -- that ENEMY_TURN concluded the round and redrew the hand;
+    // force the rot hand this claim needs (see the guard-banking test above
+    // for the same pattern).
+    state = {
+      ...state,
+      playerHand: [
         { id: 'ph1', kind: 'creature', suit: 'rot' },
         { id: 'ph2', kind: 'creature', suit: 'rot' },
       ],
-    });
-    const rng = createRng(6);
-    let state: CombatState = initCombat(room, rng, 30, 30);
-    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
-    expect(state.playerStatuses.weaken).toBe(3);
+    };
 
     // raw magnitude 4 x 2 = 8, weakened 3 stacks x 10% = 30% -> round(5.6) = 6
     let next = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
-      false,
     );
     expect(next.enemies[0].hp).toBe(18 - 6);
     // One of two plays spent (PLAYS_PER_TURN_BASE = 2) -- the player's turn,
     // and thus the status decay tick, hasn't happened yet.
     expect(next.playerStatuses.weaken).toBe(3);
 
-    next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng, false);
+    next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng);
     expect(next.playerStatuses.weaken).toBe(2); // decays by 1 at the end of the player's turn, not fully expired
   });
 
@@ -386,10 +416,10 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
       enemies: [makeEnemy({ defId: 'ember-wretch', name: 'Ember Wretch', patternIndex: 1 })], // ember-wretch[1] = corrupt block-suit
     });
     const rng = createRng(7);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(next.blockedSuits.wolf).toBe(SURPRISE_BLOCK_DURATION_TURNS);
   });
 
@@ -398,27 +428,35 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
       enemies: [makeEnemy({ defId: 'spider-broodmother', name: 'Spider Broodmother', patternIndex: 0 })], // [0] = corrupt add-cards
     });
     const rng = createRng(8);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
     const before = state.pool.length;
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(next.pool.length).toBe(before + SURPRISE_ADD_CARDS_COUNT);
     const added = next.pool.slice(before);
     expect(added.every((c) => isCreatureCard(c) && room.params.threatSuits.includes(c.suit))).toBe(true);
   });
 
-  it('corrupt/force-discard removes a random card from the player hand', () => {
+  it('corrupt/force-discard routes a random hand card to the discard pile, recoverable on the next reshuffle', () => {
     const room = makeRoom({
-      enemies: [makeEnemy({ patternIndex: 1 })], // wolf-kin[1] = corrupt force-discard
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+      enemies: [
+        makeEnemy({ instanceId: 'e1', patternIndex: 1 }), // wolf-kin[1] = corrupt force-discard
+        // A second enemy so e1 acting isn't the whole round concluding --
+        // otherwise the round-end redraw (which fires in the very same
+        // dispatched action) would immediately overwrite the hand this test
+        // is trying to observe right after the discard.
+        makeEnemy({ instanceId: 'e2', patternIndex: 3 }), // wolf-kin[3] = strength (self-buff, doesn't touch the player)
+      ],
     });
     const rng = createRng(9);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(next.playerHand.length).toBe(0);
+    expect(next.discardPile.some((c) => c.id === 'ph1')).toBe(true);
+    expect(next.activeTurn).toBe('enemy'); // round not over -- e2 still to act
   });
 });
 
@@ -428,16 +466,16 @@ describe('status effects: Weaken/Strength/Poison are stacks that decay by 1 per 
       enemies: [makeEnemy({ defId: 'spider-broodmother', name: 'Spider Broodmother', hp: 22, hpMax: 22, patternIndex: 2 })], // spider[2] = poison 4
     });
     const rng = createRng(23);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(state.playerStatuses.poison).toBe(4);
     expect(state.playerHP).toBe(30); // applying the stacks doesn't hit immediately
 
     // Player passes; poison deals its current stack count (4) at the end of
     // the player's own turn, then decays by 1 -- not wiped to 0.
-    const next = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
+    const next = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
     expect(next.playerHP).toBe(30 - 4);
     expect(next.playerStatuses.poison).toBe(3);
   });
@@ -447,16 +485,16 @@ describe('status effects: Weaken/Strength/Poison are stacks that decay by 1 per 
       enemies: [makeEnemy({ patternIndex: 3 })], // wolf-kin[3] = strength 3
     });
     const rng = createRng(24);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
     // Granting the buff also ticks it down once, at the end of this same turn.
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(state.enemies[0].statuses.strength).toBe(2);
 
-    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
     // wolf-kin[0] = attack 4, boosted by its 2 remaining Strength stacks -> 6
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(next.playerHP).toBe(30 - 6);
     expect(next.enemies[0].statuses.strength).toBe(1); // decays again after this turn
   });
@@ -464,13 +502,12 @@ describe('status effects: Weaken/Strength/Poison are stacks that decay by 1 per 
   it('strength on the player boosts a threat claim by adding stacks to the pool set size before the hand-card multiplier', () => {
     const room = makeRoom({
       pool: [{ id: 'p1', kind: 'creature', suit: 'wolf' }],
-      playerHandDeal: [
-        { id: 'ph1', kind: 'creature', suit: 'wolf' },
-        { id: 'ph2', kind: 'creature', suit: 'wolf' },
-      ],
     });
     const rng = createRng(25);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [
+      { id: 'ph1', kind: 'creature', suit: 'wolf' },
+      { id: 'ph2', kind: 'creature', suit: 'wolf' },
+    ]);
     state = { ...state, playerStatuses: { strength: 3 } };
 
     // (pool set size 1 + 3 Strength) x 2 hand cards = 8
@@ -478,14 +515,13 @@ describe('status effects: Weaken/Strength/Poison are stacks that decay by 1 per 
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
-      false,
     );
     expect(next.enemies[0].hp).toBe(20 - 8);
     // One of two plays spent (PLAYS_PER_TURN_BASE = 2) -- turn hasn't ended
     // yet, so no decay tick.
     expect(next.playerStatuses.strength).toBe(3);
 
-    next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng, false);
+    next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng);
     expect(next.playerStatuses.strength).toBe(2); // decays by 1 at the end of the player's turn
   });
 
@@ -497,16 +533,16 @@ describe('status effects: Weaken/Strength/Poison are stacks that decay by 1 per 
       ],
     });
     const rng = createRng(26);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false); // e1 acts, then its own poison tick kills it
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // e1 acts, then its own poison tick kills it
     expect(state.enemies.length).toBe(2); // corpse retained mid-phase, not spliced out yet
     expect(state.enemies.find((e) => e.instanceId === 'e1')!.hp).toBe(0);
     expect(state.activeTurn).toBe('enemy');
     expect(state.activeEnemyIndex).toBe(1); // correctly advanced to e2, not skipped or repeated
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false); // e2 still gets its turn
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // e2 still gets its turn
     expect(next.playerHP).toBe(30 - 4 - 4); // e1's attack (4) + e2's attack (4)
     expect(next.enemies.length).toBe(1); // corpse swept once the round concludes
     expect(next.enemies[0].instanceId).toBe('e2');
@@ -523,15 +559,15 @@ describe('multi-enemy phase and Guard', () => {
       ],
     });
     const rng = createRng(10);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
     state = { ...state, playerGuard: 5, activeTurn: 'enemy', activeEnemyIndex: 0 };
 
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false); // e1 attacks for 4, absorbed
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // e1 attacks for 4, absorbed
     expect(state.playerHP).toBe(30);
     expect(state.playerGuard).toBe(1);
     expect(state.activeTurn).toBe('enemy'); // phase not over -- e2 still to act
 
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false); // e2 attacks for 3: 1 absorbed, 2 through
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // e2 attacks for 3: 1 absorbed, 2 through
     expect(state.playerHP).toBe(30 - 2);
     // Guard was fully consumed absorbing e2's hit, not left over to expire --
     // no separate guard-fade entry is expected in that case.
@@ -549,15 +585,14 @@ describe('decay backstop', () => {
         { id: 'p1', kind: 'creature', suit: 'rot' },
         { id: 'p2', kind: 'creature', suit: 'rot' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
       enemies: [makeEnemy({ patternIndex: 3 })], // guard, not attack -- isolates the decay math from enemy damage
     });
     const rng = createRng(11);
-    let state: CombatState = initCombat(room, rng, 20, 30);
+    let state: CombatState = makeCombat(room, rng, 20, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
 
     for (let i = 0; i < 8 && state.status === 'active'; i++) {
       const action = state.activeTurn === 'player' ? { type: 'PLAYER_PASS' as const } : { type: 'ENEMY_TURN' as const };
-      state = applyCombatAction(state, action, rng, false);
+      state = applyCombatAction(state, action, rng);
     }
 
     const decayLogs = state.log.filter((l) => l.type === 'decay');
@@ -581,10 +616,9 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
         { id: 'p2', kind: 'creature', suit: 'rot' },
         { id: 'p3', kind: 'creature', suit: 'rot' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
     });
     const rng = createRng(19);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
     // Fast-forward the decay counter to one tick shy of resolving, and to the
     // last enemy's turn (decay only ticks at round-end), so a single
     // dispatched action triggers it deterministically.
@@ -595,7 +629,7 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
       activeEnemyIndex: 1,
     };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     // magnitude = pile size (3) x 1 -- no hand-card multiplier
     expect(next.playerHP).toBe(30 - 3);
@@ -613,10 +647,9 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
         { id: 'p1', kind: 'creature', suit: 'grace' },
         { id: 'p2', kind: 'creature', suit: 'grace' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
     });
     const rng = createRng(20);
-    let state: CombatState = initCombat(room, rng, 15, 30);
+    let state: CombatState = makeCombat(room, rng, 15, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
     state = {
       ...state,
       decayCounters: { grace: DECAY_TURNS_N - 1 },
@@ -624,7 +657,7 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
       activeEnemyIndex: 0,
     };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     expect(next.playerHP).toBe(15 + 2);
     expect(next.enemies[0].hp).toBe(10 + 2);
@@ -640,10 +673,9 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
         { id: 'p1', kind: 'creature', suit: 'ward' },
         { id: 'p2', kind: 'creature', suit: 'ward' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
     });
     const rng = createRng(21);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
     state = {
       ...state,
       decayCounters: { ward: DECAY_TURNS_N - 1 },
@@ -651,7 +683,7 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
       activeEnemyIndex: 0,
     };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     expect(next.playerGuard).toBe(2);
     expect(next.enemies[0].guard).toBe(2);
@@ -667,10 +699,9 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
         { id: 'p2', kind: 'creature', suit: 'rot' },
         { id: 'p3', kind: 'creature', suit: 'rot' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
     });
     const rng = createRng(22);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
     state = {
       ...state,
       decayCounters: { rot: DECAY_TURNS_N - 1 },
@@ -678,7 +709,7 @@ describe('decay applies the pile\'s own effect at magnitude = pile size only, to
       activeEnemyIndex: 0,
     };
 
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     expect(next.enemies).toEqual([]);
     expect(next.status).toBe('room-cleared');
@@ -689,8 +720,8 @@ describe('pool exhaustion', () => {
   it('refills the pool and keeps the round active rather than clearing it for free', () => {
     const room = makeRoom({ pool: [] });
     const rng = createRng(12);
-    let state = initCombat(room, rng, 30, 30);
-    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
+    let state = makeCombat(room, rng, 30, 30);
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
 
     expect(state.status).toBe('active');
     expect(state.enemies[0].hp).toBe(20); // untouched -- refill isn't a claim
@@ -707,10 +738,9 @@ describe('MIN_POOL_SET_SIZE = 1 (1 on the table, 1 in hand)', () => {
         { id: 'p2', kind: 'creature', suit: 'rot' },
         { id: 'p3', kind: 'creature', suit: 'rot' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
     });
     const rng = createRng(13);
-    const state = initCombat(room, rng, 30, 30);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
     const next = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
@@ -729,10 +759,9 @@ describe('boon suit', () => {
         { id: 'p1', kind: 'creature', suit: 'grace' },
         { id: 'p2', kind: 'creature', suit: 'grace' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'grace' }],
     });
     const rng = createRng(14);
-    const state = initCombat(room, rng, 20, 30);
+    const state = makeCombat(room, rng, 20, 30, [{ id: 'ph1', kind: 'creature', suit: 'grace' }]);
     const next = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'grace', handCardIds: ['ph1'] }, rng);
     expect(next.playerHP).toBe(22); // healed by 2x1
   });
@@ -745,11 +774,10 @@ describe('guard suit (Ward)', () => {
         { id: 'p1', kind: 'creature', suit: 'ward' },
         { id: 'p2', kind: 'creature', suit: 'ward' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'ward' }],
     });
     const rng = createRng(15);
-    const state = initCombat(room, rng, 30, 30);
-    const next = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'ward', handCardIds: ['ph1'] }, rng, false);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'ward' }]);
+    const next = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'ward', handCardIds: ['ph1'] }, rng);
 
     expect(next.playerGuard).toBe(2);
     expect(next.playerHP).toBe(30);
@@ -762,17 +790,16 @@ describe('guard suit (Ward)', () => {
         { id: 'p1', kind: 'creature', suit: 'ward' },
         { id: 'p2', kind: 'creature', suit: 'ward' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'ward' }],
       enemies: [makeEnemy({ patternIndex: 0 })], // attack 4
     });
     const rng = createRng(16);
-    let state = initCombat(room, rng, 30, 30);
-    state = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'ward', handCardIds: ['ph1'] }, rng, false);
+    let state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'ward' }]);
+    state = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'ward', handCardIds: ['ph1'] }, rng);
     expect(state.playerGuard).toBe(2);
     expect(state.activeTurn).toBe('player'); // one play spent, one left (PLAYS_PER_TURN_BASE = 2) -- still the player's turn
-    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
 
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     // attack 4; Guard absorbs 2, 2 gets through
     expect(state.playerHP).toBe(30 - 2);
     expect(state.playerGuard).toBe(0);
@@ -786,15 +813,13 @@ describe('weaken suit (Hex)', () => {
         { id: 'p1', kind: 'creature', suit: 'hex' },
         { id: 'p2', kind: 'creature', suit: 'hex' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'hex' }],
     });
     const rng = createRng(27);
-    const state = initCombat(room, rng, 30, 30);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'hex' }]);
     const next = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'hex', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
-      false,
     );
     expect(next.enemies[0].statuses.weaken).toBe(2); // pool set size 2 x 1 hand card
     expect(next.enemies[0].hp).toBe(20); // no HP change
@@ -806,10 +831,9 @@ describe('weaken suit (Hex)', () => {
         { id: 'p1', kind: 'creature', suit: 'hex' },
         { id: 'p2', kind: 'creature', suit: 'hex' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'hex' }],
     });
     const rng = createRng(28);
-    const state = initCombat(room, rng, 30, 30);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'hex' }]);
     const legal = getLegalPlayerClaimTargets(state).filter((t) => t.suit === 'hex');
     expect(legal.length).toBe(1);
     expect(legal[0].targetInstanceId).toBe('e1');
@@ -818,7 +842,6 @@ describe('weaken suit (Hex)', () => {
       state,
       { type: 'PLAYER_CLAIM', suit: 'hex', handCardIds: ['ph1'] }, // no targetInstanceId
       rng,
-      false,
     );
     expect(rejected).toBe(state); // illegal claim, state unchanged
   });
@@ -831,22 +854,20 @@ describe('poison suit (Venom)', () => {
         { id: 'p1', kind: 'creature', suit: 'venom' },
         { id: 'p2', kind: 'creature', suit: 'venom' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'venom' }],
       enemies: [makeEnemy({ patternIndex: 1 })], // wolf-kin[1] = corrupt force-discard, isolates the poison damage
     });
     const rng = createRng(29);
-    let state: CombatState = initCombat(room, rng, 30, 30);
+    let state: CombatState = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'venom' }]);
     state = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'venom', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
-      false,
     );
     expect(state.enemies[0].statuses.poison).toBe(2);
     expect(state.enemies[0].hp).toBe(20); // applying the stacks doesn't hit immediately
 
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
-    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(next.enemies[0].hp).toBe(20 - 2); // its own poison tick, at the true end of its own turn
     expect(next.enemies[0].statuses.poison).toBe(1); // decays by 1
   });
@@ -859,11 +880,10 @@ describe('strength suit (Vigor)', () => {
         { id: 'p1', kind: 'creature', suit: 'vigor' },
         { id: 'p2', kind: 'creature', suit: 'vigor' },
       ],
-      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'vigor' }],
     });
     const rng = createRng(30);
-    const state = initCombat(room, rng, 30, 30);
-    let next = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'vigor', handCardIds: ['ph1'] }, rng, false);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'vigor' }]);
+    let next = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'vigor', handCardIds: ['ph1'] }, rng);
     // pool set size 2 x 1 hand card = 2 stacks granted. One of two plays
     // spent (PLAYS_PER_TURN_BASE = 2) -- the turn hasn't ended yet, so no
     // decay tick fires.
@@ -873,37 +893,67 @@ describe('strength suit (Vigor)', () => {
 
     // Passing ends the turn -- the same cadence the existing
     // player-Strength/Weaken tests already exercise.
-    next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng, false);
+    next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng);
     expect(next.playerStatuses.strength).toBe(1);
   });
 });
 
-describe('hand redraw (experimental)', () => {
-  it('replaces the player hand once the enemy phase concludes and control returns to the player', () => {
+describe('hand discard & redraw (persistent deck)', () => {
+  it('discards the whole hand and draws a fresh one once the enemy phase concludes, conserving every card', () => {
     const room = makeRoom();
     const rng = createRng(17);
-    let state = initCombat(room, rng, 30, 30);
-    const originalHandIds = state.playerHand.map((c: Card) => c.id);
+    const deck = makeDeck('wolf', 8, 'pd');
+    // Genuinely drawn from `deck` (no hand override here) -- the point of
+    // this test is to conserve every card the deck started with, which a
+    // manual playerHand override would break.
+    let state = initCombat(room, rng, 30, 30, deck);
+    const originalHandIds = state.playerHand.map((c) => c.id);
 
-    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, true);
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, true);
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     expect(state.activeTurn).toBe('player');
     expect(state.playerHand.length).toBe(room.params.playerHandSize);
     expect(state.playerHand.map((c) => c.id)).not.toEqual(originalHandIds);
     expect(state.log.some((l) => l.type === 'redraw')).toBe(true);
+
+    // No card the deck started with is ever lost -- the new hand plus
+    // whatever's left in drawPile/discardPile still accounts for every id
+    // the deck was built from (the old hand, unclaimed, went to discard).
+    const allIdsNow = new Set([
+      ...state.playerHand.map((c) => c.id),
+      ...state.drawPile.map((c) => c.id),
+      ...state.discardPile.map((c) => c.id),
+    ]);
+    expect(allIdsNow.size).toBe(deck.length);
+    for (const c of deck) expect(allIdsNow.has(c.id)).toBe(true);
   });
 
-  it('leaves the hand untouched between turns when disabled', () => {
-    const room = makeRoom();
-    const rng = createRng(18);
-    let state = initCombat(room, rng, 30, 30);
-    const originalHandIds = state.playerHand.map((c: Card) => c.id);
+  it('routes claimed cards to the discard pile, where they can be drawn again later in the same room', () => {
+    const room = makeRoom({
+      pool: [{ id: 'p1', kind: 'creature', suit: 'wolf' }],
+    });
+    const rng = createRng(40);
+    // A tiny 2-card deck forces a reshuffle on the very next draw, so the
+    // just-claimed card is guaranteed to come back around.
+    const deck: Card[] = [
+      { id: 'tiny-1', kind: 'creature', suit: 'wolf' },
+      { id: 'tiny-2', kind: 'creature', suit: 'wolf' },
+    ];
+    let state = initCombat(room, rng, 30, 30, deck);
+    const claimedId = state.playerHand[0].id;
 
-    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    state = applyCombatAction(
+      state,
+      { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: [claimedId] },
+      rng,
+    );
+    expect(state.discardPile.some((c) => c.id === claimedId)).toBe(true);
 
-    expect(state.playerHand.map((c) => c.id)).toEqual(originalHandIds);
-    expect(state.log.some((l) => l.type === 'redraw')).toBe(false);
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+
+    const seenAgain = [...state.playerHand, ...state.drawPile, ...state.discardPile].some((c) => c.id === claimedId);
+    expect(seenAgain).toBe(true);
   });
 });

@@ -19,7 +19,6 @@ import {
   ROOM_MAX_ENEMIES,
   THREAT_SUITS,
   THREAT_SUIT_COUNT_BY_SIZE_BAND,
-  QUAKE_CARD_RATIO,
 } from '../config/constants';
 
 let roomCounter = 0;
@@ -109,21 +108,5 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
     rng,
   );
 
-  const playerHandDeal = generateWeightedDeck(
-    params.playerHandSize,
-    `${id}-phand`,
-    {
-      onSuitTargets: threatSuits,
-      onSuitRatio: params.onSuitRatio,
-      boonRatio: params.boonRatio,
-      guardRatio: params.guardRatio,
-      weakenRatio: params.weakenRatio,
-      poisonRatio: params.poisonRatio,
-      strengthRatio: params.strengthRatio,
-      quakeRatio: QUAKE_CARD_RATIO,
-    },
-    rng,
-  );
-
-  return { id, params, enemies, pool, playerHandDeal };
+  return { id, params, enemies, pool };
 }

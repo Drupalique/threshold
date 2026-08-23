@@ -20,13 +20,9 @@ export interface DeckParams {
   weakenRatio?: number;
   poisonRatio?: number;
   strengthRatio?: number;
-  // The Quake special card (see types/cards.ts) -- optional, defaulting to
-  // 0. Only ever passed by hand-drawing call sites; pool generation never
-  // sets this, since Quake is a hand-only card.
-  quakeRatio?: number;
 }
 
-type CardCategory = 'on-suit' | 'boon' | 'guard' | 'weaken' | 'poison' | 'strength' | 'quake';
+type CardCategory = 'on-suit' | 'boon' | 'guard' | 'weaken' | 'poison' | 'strength';
 
 /**
  * Builds a weighted-random deck of `count` cards. Used identically for the
@@ -45,7 +41,6 @@ export function generateWeightedDeck(
   const weakenRatio = params.weakenRatio ?? 0;
   const poisonRatio = params.poisonRatio ?? 0;
   const strengthRatio = params.strengthRatio ?? 0;
-  const quakeRatio = params.quakeRatio ?? 0;
   const remainder = Math.max(
     0,
     1 -
@@ -54,8 +49,7 @@ export function generateWeightedDeck(
       params.guardRatio -
       weakenRatio -
       poisonRatio -
-      strengthRatio -
-      quakeRatio,
+      strengthRatio,
   );
   const onSuitWeight = params.onSuitRatio + remainder;
 
@@ -66,7 +60,6 @@ export function generateWeightedDeck(
     { weight: weakenRatio, value: 'weaken' },
     { weight: poisonRatio, value: 'poison' },
     { weight: strengthRatio, value: 'strength' },
-    { weight: quakeRatio, value: 'quake' },
   ];
 
   const cards: Card[] = [];
@@ -93,9 +86,6 @@ export function generateWeightedDeck(
         break;
       case 'strength':
         cards.push({ id, kind: 'creature', suit: STRENGTH_SUIT });
-        break;
-      case 'quake':
-        cards.push({ id, kind: 'quake' });
         break;
     }
   }

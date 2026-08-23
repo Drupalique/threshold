@@ -1,17 +1,34 @@
-// Batch playtest simulator: plays full runs against the real engine with a
-// heuristic "competent player" bot (see pickBestClaim/pickDoor below) and
+// Batch playtest simulator: plays full runs against the real engine and
 // instruments the outcomes, so questions about tension/pacing/decay/multi-
 // enemy dynamics can be answered with distributions across many seeds
 // instead of a single hand-played room. No UI, no mocking -- same
 // runEngine/combatEngine calls the interactive scripts/playtest.ts CLI uses.
 //
+// Two player-turn decision-makers are available, via PLAYTEST_BOT:
+//   heuristic (default) -- see pickBestClaim below, a scored greedy bot.
+//   llm                 -- combat claim/pass decisions go through Claude
+//                           (see llmBot.ts) via a cheap model. Reward and
+//                           door choices stay on the heuristic pickers
+//                           below regardless of PLAYTEST_BOT -- this only
+//                           swaps out per-turn claim/pass decisions.
+// Requires ANTHROPIC_API_KEY when PLAYTEST_BOT=llm. Start small -- each run
+// is one real API call per player decision, sequential, not batched.
+//
 // Usage: npx tsx scripts/playtest-sim.ts [numRuns] [startSeed]
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseDoor } from '../src/engine/runEngine.ts';
-import { getLegalPlayerClaimTargets, requiresEnemyTarget, type LegalClaimTarget } from '../src/engine/combatEngine.ts';
+//        PLAYTEST_BOT=llm npx tsx scripts/playtest-sim.ts 1 1
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor } from '../src/engine/runEngine.ts';
+import { getLegalPlayerClaimTargets, type LegalClaimTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS, DECAY_TURNS_N } from '../src/config/constants.ts';
+import { pickLlmClaim, llmStats } from './llmBot.ts';
 import type { RunState } from '../src/types/run.ts';
 import type { CombatState } from '../src/types/combat.ts';
 import type { SuitId, SuitCategory } from '../src/types/suits.ts';
+
+const BOT_MODE = (process.env.PLAYTEST_BOT ?? 'heuristic') as 'heuristic' | 'llm';
+if (BOT_MODE === 'llm' && !process.env.ANTHROPIC_API_KEY) {
+  console.error('PLAYTEST_BOT=llm requires ANTHROPIC_API_KEY to be set in the environment.');
+  process.exit(1);
+}
 
 const suitCategory = (id: SuitId): SuitCategory => SUIT_DEFINITIONS.find((s) => s.id === id)!.category;
 const suitByName = (name: string) => SUIT_DEFINITIONS.find((s) => s.name.toLowerCase() === name.toLowerCase());
@@ -154,6 +171,34 @@ function pickBestClaim(state: CombatState, targets: LegalClaimTarget[]): ScoredC
   return best;
 }
 
+// Reward-pick heuristic (PERSISTENT_DECK_PLAN.md Phase 5): prefer whichever
+// offered suit already has the most live copies in run.deck -- a simple
+// "double down on what you've built" consistency bias, not a solver. Doors
+// don't signal reward suits yet (that wiring is a follow-up per the plan),
+// so this is the only signal available. Quake scores as an average suit's
+// worth, since it's neither clearly better nor worse than another copy of
+// whatever's already well-represented.
+function pickReward(run: RunState): string {
+  const options = run.rewardOptions!;
+  const suitCounts = new Map<SuitId, number>();
+  for (const c of run.deck) {
+    if (c.kind !== 'creature') continue;
+    suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
+  }
+  const avgCount = suitCounts.size > 0 ? run.deck.length / suitCounts.size : 1;
+
+  let bestId = options[0].id;
+  let bestScore = -Infinity;
+  for (const opt of options) {
+    const score = opt.kind === 'quake' ? avgCount : (suitCounts.get(opt.suit) ?? 0);
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = opt.id;
+    }
+  }
+  return bestId;
+}
+
 function pickDoor(run: RunState): string {
   const doors = run.currentDoors!;
   const hpRatio = run.playerHP / run.playerHPMax;
@@ -225,7 +270,7 @@ function runEnemyPhaseToNextDecision(run: RunState): RunState {
   return next;
 }
 
-function playPlayerTurn(run: RunState): RunState {
+async function playPlayerTurn(run: RunState): Promise<RunState> {
   let next = run;
   let guard = 0;
   while (next.phase === 'combat' && next.combat?.status === 'active' && next.combat.activeTurn === 'player') {
@@ -234,6 +279,10 @@ function playPlayerTurn(run: RunState): RunState {
       return { ...next, phase: 'run-over' as const };
     }
     const state = next.combat;
+    // Quake is auto-played the moment it's in hand regardless of bot mode --
+    // it never expires within the turn and only ever adds plays, so there's
+    // no decision here for either bot to make (see PERSISTENT_DECK_PLAN.md
+    // discussion of the card).
     const quakeCard = state.playerHand.find((c) => c.kind === 'quake');
     if (quakeCard) {
       next = applyCombatAction(next, { type: 'PLAYER_PLAY_QUAKE', cardId: quakeCard.id });
@@ -248,8 +297,18 @@ function playPlayerTurn(run: RunState): RunState {
       next = applyCombatAction(next, { type: 'PLAYER_PASS' });
       break;
     }
-    const best = pickBestClaim(state, targets);
-    if (!best || best.score <= 0) {
+
+    const chosen =
+      BOT_MODE === 'llm'
+        ? await pickLlmClaim(state, targets)
+        : (() => {
+            const best = pickBestClaim(state, targets);
+            return best && best.score > 0
+              ? { suit: best.suit, targetInstanceId: best.targetInstanceId, handCardIds: best.handCardIds }
+              : null;
+          })();
+
+    if (!chosen) {
       m.voluntaryPassTurns++;
       m.totalPlayerTurns++;
       m.unclaimedCardsPerTurn.push(state.playerHand.length);
@@ -257,8 +316,8 @@ function playPlayerTurn(run: RunState): RunState {
       break;
     }
 
-    const category = suitCategory(best.suit);
-    const targetEnemy = best.targetInstanceId ? state.enemies.find((e) => e.instanceId === best.targetInstanceId) : undefined;
+    const category = suitCategory(chosen.suit);
+    const targetEnemy = chosen.targetInstanceId ? state.enemies.find((e) => e.instanceId === chosen.targetInstanceId) : undefined;
     const before = {
       enemyHp: targetEnemy?.hp,
       playerHP: state.playerHP,
@@ -269,12 +328,12 @@ function playPlayerTurn(run: RunState): RunState {
 
     next = applyCombatAction(next, {
       type: 'PLAYER_CLAIM',
-      suit: best.suit,
-      targetInstanceId: best.targetInstanceId,
-      handCardIds: best.handCardIds,
+      suit: chosen.suit,
+      targetInstanceId: chosen.targetInstanceId,
+      handCardIds: chosen.handCardIds,
     });
     const after = next.combat!;
-    const afterEnemy = best.targetInstanceId ? after.enemies.find((e) => e.instanceId === best.targetInstanceId) : undefined;
+    const afterEnemy = chosen.targetInstanceId ? after.enemies.find((e) => e.instanceId === chosen.targetInstanceId) : undefined;
 
     if (category === 'threat') {
       const dealt = before.enemyHp! - (afterEnemy?.hp ?? 0);
@@ -314,16 +373,20 @@ function classifyDeath(finalCombat: CombatState, prevLogLength: number, depth: n
   m.deathDepths.push(depth);
 }
 
-function playRun(seed: number) {
+async function playRun(seed: number): Promise<void> {
   let run = createNewRun(seed);
   run = startFirstRoom(run);
   let roomsCleared = 0;
   let safety = 0;
 
-  while (run.phase === 'combat' || run.phase === 'door-choice') {
+  while (run.phase === 'combat' || run.phase === 'reward' || run.phase === 'door-choice') {
     if (safety++ > 400) {
       m.anomalies++;
       return;
+    }
+    if (run.phase === 'reward') {
+      run = chooseReward(run, pickReward(run));
+      continue;
     }
     if (run.phase === 'door-choice') {
       run = chooseDoor(run, pickDoor(run));
@@ -341,7 +404,7 @@ function playRun(seed: number) {
         m.anomalies++;
         return;
       }
-      run = playPlayerTurn(run);
+      run = await playPlayerTurn(run);
       if (run.phase !== 'combat' || run.combat!.status !== 'active') break;
       run = runEnemyPhaseToNextDecision(run);
     }
@@ -381,15 +444,23 @@ function stats(arr: number[]) {
 
 // --- main -------------------------------------------------------------
 
-const numRuns = Number(process.argv[2] ?? 300);
+// Default run count is much smaller in llm mode -- each run is a sequence
+// of real, sequential API calls, so an accidental no-args invocation
+// shouldn't silently fire off hundreds of requests.
+const DEFAULT_RUNS = BOT_MODE === 'llm' ? 5 : 300;
+const numRuns = Number(process.argv[2] ?? DEFAULT_RUNS);
 const startSeed = Number(process.argv[3] ?? 1);
 
 for (let i = 0; i < numRuns; i++) {
-  playRun(startSeed + i);
+  await playRun(startSeed + i);
+  if (BOT_MODE === 'llm') {
+    const { callCount, fallbackCount } = llmStats();
+    console.error(`[progress] run ${i + 1}/${numRuns} done -- ${callCount} llm calls so far (${fallbackCount} fallback-to-pass)`);
+  }
 }
 
 const report = {
-  config: { numRuns, startSeed, DECAY_TURNS_N },
+  config: { numRuns, startSeed, DECAY_TURNS_N, botMode: BOT_MODE, ...(BOT_MODE === 'llm' ? { llm: llmStats() } : {}) },
   outcomes: { runs: m.runs, wins: m.wins, losses: m.losses, anomalies: m.anomalies, winRate: Number((m.wins / m.runs).toFixed(3)) },
   depthReached: stats(m.depthReached),
   roomsClearedPerRun: stats(m.roomsClearedPerRun),
