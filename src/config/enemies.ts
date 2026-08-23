@@ -17,11 +17,15 @@ export const ENEMY_DEFS: EnemyDef[] = [
     name: 'Wolf-kin',
     hpMax: 14,
     minFloor: 1,
+    // Strength stacks decay 1/turn (see engine/statusEffects.ts), so the 3
+    // stacks banked here have faded to 2 by the time the cycle's first
+    // attack lands and 0 by the second -- one boosted hit (4 -> 6) per
+    // cycle, not two. First demonstration enemy for the Strength status.
     pattern: [
       { type: 'attack', magnitude: 4 },
       { type: 'corrupt', corruptEffect: 'force-discard' },
       { type: 'attack', magnitude: 4 },
-      { type: 'guard', magnitude: 5 },
+      { type: 'strength', magnitude: 3 },
     ],
   },
   {
@@ -40,8 +44,10 @@ export const ENEMY_DEFS: EnemyDef[] = [
     name: 'Rot Husk',
     hpMax: 18,
     minFloor: 2,
+    // 3 Weaken stacks x WEAKEN_PCT_PER_STACK (0.1) = 30%, same reduction the
+    // old flat-fraction debuff dealt -- converted to stacks, not rebalanced.
     pattern: [
-      { type: 'debuff', magnitude: 0.3 },
+      { type: 'debuff', magnitude: 3 },
       { type: 'attack', magnitude: 4 },
       { type: 'heal', magnitude: 4 },
     ],
@@ -51,10 +57,13 @@ export const ENEMY_DEFS: EnemyDef[] = [
     name: 'Spider Broodmother',
     hpMax: 22,
     minFloor: 3,
+    // First demonstration enemy for the Poison status -- one of its two
+    // attacks is a venom bite instead, applying 4 Poison stacks (4 damage
+    // next turn, decaying) rather than an immediate flat hit.
     pattern: [
       { type: 'corrupt', corruptEffect: 'add-cards' },
       { type: 'attack', magnitude: 6 },
-      { type: 'attack', magnitude: 6 },
+      { type: 'poison', magnitude: 4 },
       { type: 'guard', magnitude: 6 },
     ],
   },

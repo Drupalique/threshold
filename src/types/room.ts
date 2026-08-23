@@ -19,6 +19,9 @@ export interface RoomParams {
   onSuitRatio: number;
   boonRatio: number;
   guardRatio: number;
+  weakenRatio: number;
+  poisonRatio: number;
+  strengthRatio: number;
 }
 
 export interface RoomInstance {

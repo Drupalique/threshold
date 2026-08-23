@@ -1,5 +1,7 @@
 import type { EnemyInstance } from '../../types/enemy';
 import type { IntentType, CorruptEffectType } from '../../types/enemy';
+import type { StatusId } from '../../types/status';
+import { STATUS_DEFS } from '../../types/status';
 import { currentIntent } from '../../engine/roomIntent';
 import { MeterBar } from './MeterBar';
 
@@ -8,6 +10,8 @@ const INTENT_LABEL: Record<IntentType, string> = {
   guard: 'Guard',
   heal: 'Heal',
   debuff: 'Weaken',
+  poison: 'Poison',
+  strength: 'Strength',
   corrupt: 'Corrupt',
 };
 
@@ -16,7 +20,15 @@ const INTENT_ICON: Record<IntentType, string> = {
   guard: '\u{1F6E1}',
   heal: '✚',
   debuff: '☠',
+  poison: '\u{2623}',
+  strength: '\u{1F4AA}',
   corrupt: '\u{1F300}',
+};
+
+const STATUS_ICON: Record<StatusId, string> = {
+  weaken: '☠',
+  poison: '\u{2623}',
+  strength: '\u{1F4AA}',
 };
 
 const CORRUPT_LABEL: Record<CorruptEffectType, string> = {
@@ -32,12 +44,28 @@ function intentText(instance: EnemyInstance): string {
     case 'attack':
     case 'guard':
     case 'heal':
-      return `${label} ${step.magnitude ?? 0}`;
     case 'debuff':
-      return `${label} ${Math.round((step.magnitude ?? 0) * 100)}%`;
+    case 'poison':
+    case 'strength':
+      return `${label} ${step.magnitude ?? 0}`;
     case 'corrupt':
       return `${label}: ${step.corruptEffect ? CORRUPT_LABEL[step.corruptEffect] : ''}`;
   }
+}
+
+/** Small "Weaken 2" / "Poison 3" style badges for whatever stacks a holder (an enemy, or the player) currently carries. */
+export function StatusBadges({ statuses }: { statuses: Partial<Record<StatusId, number>> }) {
+  const active = (Object.keys(statuses) as StatusId[]).filter((id) => (statuses[id] ?? 0) > 0);
+  if (active.length === 0) return null;
+  return (
+    <>
+      {active.map((id) => (
+        <span key={id} className={`status-badge status-badge--${id}`}>
+          {STATUS_ICON[id]} {STATUS_DEFS[id].name} {statuses[id]}
+        </span>
+      ))}
+    </>
+  );
 }
 
 interface EnemyPanelProps {
@@ -81,6 +109,7 @@ export function EnemyPanel({
               <MeterBar label="HP" value={enemy.hp} max={enemy.hpMax} color="#8e44ad" />
               <div className="enemy-card-badges">
                 {enemy.guard > 0 && <span className="enemy-guard-badge">Guard {enemy.guard}</span>}
+                <StatusBadges statuses={enemy.statuses} />
                 <span className={`enemy-intent-badge enemy-intent-badge--${intent.type}`}>
                   {INTENT_ICON[intent.type]} {intentText(enemy)}
                 </span>

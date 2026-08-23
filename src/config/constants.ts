@@ -11,6 +11,13 @@ export const SUIT_DEFINITIONS: SuitDef[] = [
   { id: 'spider', name: 'Spider', category: 'threat', displayColor: '#a93226' },
   { id: 'grace', name: 'Grace', category: 'boon', displayColor: '#d4ac0d' },
   { id: 'ward', name: 'Ward', category: 'guard', displayColor: '#16a085' },
+  // Status suits: claiming one applies its StatusId's stacks to a target
+  // (Hex/Venom, mirroring the enemy's own Debuff/Poison intents) or to the
+  // player themself (Vigor, mirroring the enemy's own Strength intent) --
+  // see combatEngine.ts's performClaim and design doc 4.9's "next step."
+  { id: 'hex', name: 'Hex', category: 'weaken', displayColor: '#8e44ad' },
+  { id: 'venom', name: 'Venom', category: 'poison', displayColor: '#229954' },
+  { id: 'vigor', name: 'Vigor', category: 'strength', displayColor: '#d35400' },
 ];
 
 export const THREAT_SUITS: SuitId[] = SUIT_DEFINITIONS.filter(
@@ -28,6 +35,19 @@ export const GUARD_SUIT: SuitId = SUIT_DEFINITIONS.find(
   (s) => s.category === 'guard',
 )!.id;
 
+// The single suit for each status effect the player can inflict -- Hex
+// (Weaken) and Venom (Poison) target an enemy like a threat claim does;
+// Vigor (Strength) targets the player themself like boon/guard.
+export const WEAKEN_SUIT: SuitId = SUIT_DEFINITIONS.find(
+  (s) => s.category === 'weaken',
+)!.id;
+export const POISON_SUIT: SuitId = SUIT_DEFINITIONS.find(
+  (s) => s.category === 'poison',
+)!.id;
+export const STRENGTH_SUIT: SuitId = SUIT_DEFINITIONS.find(
+  (s) => s.category === 'strength',
+)!.id;
+
 // Wolf/Spider read as "red" (fast, aggressive predators), Ember/Rot as "blue"
 // (slow-burning environmental threats) -- an arbitrary but fixed 4-suits-onto-
 // 2-colors mapping for the placeholder door color tag.
@@ -38,6 +58,9 @@ export const SUIT_COLOR_FAMILY: Record<SuitId, DoorColor | null> = {
   rot: 'blue',
   grace: null,
   ward: null,
+  hex: null,
+  venom: null,
+  vigor: null,
 };
 
 // --- Hands / pool -------------------------------------------------------
@@ -78,6 +101,12 @@ export const BOON_SUIT_RATIO = 0.12;
 // defensive spike (see combatEngine's applyClaimEffect), so it should show
 // up less often than a plain heal.
 export const GUARD_SUIT_RATIO = 0.08;
+// The three status suits (Hex/Venom/Vigor) share this same modest weight --
+// like Guard, a stack-inflicting claim is a strong, stackable tool, so it
+// stays rarer than a plain on-suit or boon draw.
+export const WEAKEN_SUIT_RATIO = 0.08;
+export const POISON_SUIT_RATIO = 0.08;
+export const STRENGTH_SUIT_RATIO = 0.08;
 
 // --- Combat ---------------------------------------------------------------
 
@@ -94,6 +123,13 @@ export const MIN_POOL_SET_SIZE = 1;
 
 export const SURPRISE_ADD_CARDS_COUNT = 2;
 export const SURPRISE_BLOCK_DURATION_TURNS = 1;
+
+// --- Status effects ---------------------------------------------------
+// Weaken/Strength/Poison are stack counts that decay by 1 per holder turn
+// (see engine/statusEffects.ts). Strength and Poison convert 1:1 into flat
+// damage per stack; Weaken needs a %-per-stack conversion, tuned here so
+// existing content (Rot Husk's old flat 30% debuff) maps onto 3 stacks.
+export const WEAKEN_PCT_PER_STACK = 0.1;
 
 // --- Doors ------------------------------------------------------------
 

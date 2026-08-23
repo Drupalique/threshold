@@ -16,6 +16,7 @@ function makeEnemy(overrides: Partial<EnemyInstance> = {}): EnemyInstance {
     hpMax: 20,
     guard: 0,
     patternIndex: 0,
+    statuses: {},
     ...overrides,
   };
 }
@@ -32,6 +33,9 @@ function makeRoom(overrides: Partial<RoomInstance> = {}): RoomInstance {
       onSuitRatio: 0.6,
       boonRatio: 0.12,
       guardRatio: 0.08,
+      weakenRatio: 0,
+      poisonRatio: 0,
+      strengthRatio: 0,
     },
     enemies: [makeEnemy()],
     pool: [
@@ -162,7 +166,7 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
 
   it('guard banks on the enemy and absorbs the player\'s next claim against it', () => {
     const room = makeRoom({
-      enemies: [makeEnemy({ patternIndex: 3 })], // wolf-kin[3] = guard 5
+      enemies: [makeEnemy({ defId: 'spider-broodmother', name: 'Spider Broodmother', patternIndex: 3 })], // spider-broodmother[3] = guard 6
       pool: [
         { id: 'p1', kind: 'creature', suit: 'wolf' },
         { id: 'p2', kind: 'creature', suit: 'wolf' },
@@ -177,16 +181,16 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
     let state: CombatState = initCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
-    expect(state.enemies[0].guard).toBe(5);
+    expect(state.enemies[0].guard).toBe(6);
 
-    // pool set size 3 x 2 hand cards = 6; Guard absorbs 5, 1 gets through
+    // pool set size 3 x 2 hand cards = 6; Guard absorbs all 6, none gets through
     const next = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
       false,
     );
-    expect(next.enemies[0].hp).toBe(20 - 1);
+    expect(next.enemies[0].hp).toBe(20);
     expect(next.enemies[0].guard).toBe(0);
   });
 
@@ -202,9 +206,9 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
     expect(next.enemies[0].hp).toBe(18); // capped, not 20
   });
 
-  it('debuff weakens the player\'s next threat claim, then expires whether or not it was used', () => {
+  it('debuff applies Weaken stacks that reduce the player\'s claim, then decay by 1 (not fully expire) at turn end', () => {
     const room = makeRoom({
-      enemies: [makeEnemy({ defId: 'rot-husk', name: 'Rot Husk', hp: 18, hpMax: 18, patternIndex: 0 })], // rot-husk[0] = debuff 0.3
+      enemies: [makeEnemy({ defId: 'rot-husk', name: 'Rot Husk', hp: 18, hpMax: 18, patternIndex: 0 })], // rot-husk[0] = debuff 3 stacks
       pool: [
         { id: 'p1', kind: 'creature', suit: 'rot' },
         { id: 'p2', kind: 'creature', suit: 'rot' },
@@ -220,9 +224,9 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
     let state: CombatState = initCombat(room, rng, 30, 30);
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
-    expect(state.playerWeakenPct).toBeCloseTo(0.3);
+    expect(state.playerStatuses.weaken).toBe(3);
 
-    // raw magnitude 4 x 2 = 8, weakened 30% -> round(5.6) = 6
+    // raw magnitude 4 x 2 = 8, weakened 3 stacks x 10% = 30% -> round(5.6) = 6
     const next = applyCombatAction(
       state,
       { type: 'PLAYER_CLAIM', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
@@ -230,7 +234,7 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
       false,
     );
     expect(next.enemies[0].hp).toBe(18 - 6);
-    expect(next.playerWeakenPct).toBe(0); // expired once the player's turn concluded
+    expect(next.playerStatuses.weaken).toBe(2); // decays by 1 at the end of the player's turn, not fully expired
   });
 
   it('corrupt/block-suit blocks a suit present in the pool', () => {
@@ -271,6 +275,93 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
 
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
     expect(next.playerHand.length).toBe(0);
+  });
+});
+
+describe('status effects: Weaken/Strength/Poison are stacks that decay by 1 per holder turn', () => {
+  it('poison applies stacks to the player that deal damage and decay by 1 only at the player\'s own turn end', () => {
+    const room = makeRoom({
+      enemies: [makeEnemy({ defId: 'spider-broodmother', name: 'Spider Broodmother', hp: 22, hpMax: 22, patternIndex: 2 })], // spider[2] = poison 4
+    });
+    const rng = createRng(23);
+    let state: CombatState = initCombat(room, rng, 30, 30);
+    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
+
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    expect(state.playerStatuses.poison).toBe(4);
+    expect(state.playerHP).toBe(30); // applying the stacks doesn't hit immediately
+
+    // Player passes; poison deals its current stack count (4) at the end of
+    // the player's own turn, then decays by 1 -- not wiped to 0.
+    const next = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
+    expect(next.playerHP).toBe(30 - 4);
+    expect(next.playerStatuses.poison).toBe(3);
+  });
+
+  it('strength the enemy grants itself boosts its own next attack, then decays by 1 per its own turn', () => {
+    const room = makeRoom({
+      enemies: [makeEnemy({ patternIndex: 3 })], // wolf-kin[3] = strength 3
+    });
+    const rng = createRng(24);
+    let state: CombatState = initCombat(room, rng, 30, 30);
+    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
+
+    // Granting the buff also ticks it down once, at the end of this same turn.
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    expect(state.enemies[0].statuses.strength).toBe(2);
+
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng, false);
+    // wolf-kin[0] = attack 4, boosted by its 2 remaining Strength stacks -> 6
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    expect(next.playerHP).toBe(30 - 6);
+    expect(next.enemies[0].statuses.strength).toBe(1); // decays again after this turn
+  });
+
+  it('strength on the player boosts a threat claim by adding stacks to the pool set size before the hand-card multiplier', () => {
+    const room = makeRoom({
+      pool: [{ id: 'p1', kind: 'creature', suit: 'wolf' }],
+      playerHandDeal: [
+        { id: 'ph1', kind: 'creature', suit: 'wolf' },
+        { id: 'ph2', kind: 'creature', suit: 'wolf' },
+      ],
+    });
+    const rng = createRng(25);
+    let state: CombatState = initCombat(room, rng, 30, 30);
+    state = { ...state, playerStatuses: { strength: 3 } };
+
+    // (pool set size 1 + 3 Strength) x 2 hand cards = 8
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAYER_CLAIM', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
+      rng,
+      false,
+    );
+    expect(next.enemies[0].hp).toBe(20 - 8);
+    expect(next.playerStatuses.strength).toBe(2); // decays by 1 at the end of the player's turn
+  });
+
+  it('an enemy defeated by its own Poison tick mid-phase is kept as a "corpse" until round end, so later enemies still get their turn', () => {
+    const room = makeRoom({
+      enemies: [
+        makeEnemy({ instanceId: 'e1', defId: 'rot-husk', name: 'Rot Husk', hp: 3, hpMax: 18, patternIndex: 1, statuses: { poison: 5 } }), // rot-husk[1] = attack 4; its own poison tick then kills it
+        makeEnemy({ instanceId: 'e2', defId: 'wolf-kin', name: 'Wolf-kin', hp: 14, hpMax: 14, patternIndex: 0 }), // wolf-kin[0] = attack 4
+      ],
+    });
+    const rng = createRng(26);
+    let state: CombatState = initCombat(room, rng, 30, 30);
+    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
+
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false); // e1 acts, then its own poison tick kills it
+    expect(state.enemies.length).toBe(2); // corpse retained mid-phase, not spliced out yet
+    expect(state.enemies.find((e) => e.instanceId === 'e1')!.hp).toBe(0);
+    expect(state.activeTurn).toBe('enemy');
+    expect(state.activeEnemyIndex).toBe(1); // correctly advanced to e2, not skipped or repeated
+
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false); // e2 still gets its turn
+    expect(next.playerHP).toBe(30 - 4 - 4); // e1's attack (4) + e2's attack (4)
+    expect(next.enemies.length).toBe(1); // corpse swept once the round concludes
+    expect(next.enemies[0].instanceId).toBe('e2');
+    expect(next.activeTurn).toBe('player');
   });
 });
 
@@ -534,6 +625,100 @@ describe('guard suit (Ward)', () => {
     // attack 4; Guard absorbs 2, 2 gets through
     expect(state.playerHP).toBe(30 - 2);
     expect(state.playerGuard).toBe(0);
+  });
+});
+
+describe('weaken suit (Hex)', () => {
+  it('a player claim inflicts Weaken stacks on the chosen enemy instead of HP damage, mirroring the enemy\'s own Debuff', () => {
+    const room = makeRoom({
+      pool: [
+        { id: 'p1', kind: 'creature', suit: 'hex' },
+        { id: 'p2', kind: 'creature', suit: 'hex' },
+      ],
+      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'hex' }],
+    });
+    const rng = createRng(27);
+    const state = initCombat(room, rng, 30, 30);
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAYER_CLAIM', suit: 'hex', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+      false,
+    );
+    expect(next.enemies[0].statuses.weaken).toBe(2); // pool set size 2 x 1 hand card
+    expect(next.enemies[0].hp).toBe(20); // no HP change
+  });
+
+  it('requires an enemy target the same way a threat claim does', () => {
+    const room = makeRoom({
+      pool: [
+        { id: 'p1', kind: 'creature', suit: 'hex' },
+        { id: 'p2', kind: 'creature', suit: 'hex' },
+      ],
+      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'hex' }],
+    });
+    const rng = createRng(28);
+    const state = initCombat(room, rng, 30, 30);
+    const legal = getLegalPlayerClaimTargets(state).filter((t) => t.suit === 'hex');
+    expect(legal.length).toBe(1);
+    expect(legal[0].targetInstanceId).toBe('e1');
+
+    const rejected = applyCombatAction(
+      state,
+      { type: 'PLAYER_CLAIM', suit: 'hex', handCardIds: ['ph1'] }, // no targetInstanceId
+      rng,
+      false,
+    );
+    expect(rejected).toBe(state); // illegal claim, state unchanged
+  });
+});
+
+describe('poison suit (Venom)', () => {
+  it('a player claim inflicts Poison stacks on the chosen enemy, which then deal damage on that enemy\'s own turn', () => {
+    const room = makeRoom({
+      pool: [
+        { id: 'p1', kind: 'creature', suit: 'venom' },
+        { id: 'p2', kind: 'creature', suit: 'venom' },
+      ],
+      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'venom' }],
+      enemies: [makeEnemy({ patternIndex: 1 })], // wolf-kin[1] = corrupt force-discard, isolates the poison damage
+    });
+    const rng = createRng(29);
+    let state: CombatState = initCombat(room, rng, 30, 30);
+    state = applyCombatAction(
+      state,
+      { type: 'PLAYER_CLAIM', suit: 'venom', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+      false,
+    );
+    expect(state.enemies[0].statuses.poison).toBe(2);
+    expect(state.enemies[0].hp).toBe(20); // applying the stacks doesn't hit immediately
+
+    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng, false);
+    expect(next.enemies[0].hp).toBe(20 - 2); // its own poison tick, at the true end of its own turn
+    expect(next.enemies[0].statuses.poison).toBe(1); // decays by 1
+  });
+});
+
+describe('strength suit (Vigor)', () => {
+  it('a player claim grants the player Strength stacks -- no target needed, no HP/enemy effect', () => {
+    const room = makeRoom({
+      pool: [
+        { id: 'p1', kind: 'creature', suit: 'vigor' },
+        { id: 'p2', kind: 'creature', suit: 'vigor' },
+      ],
+      playerHandDeal: [{ id: 'ph1', kind: 'creature', suit: 'vigor' }],
+    });
+    const rng = createRng(30);
+    const state = initCombat(room, rng, 30, 30);
+    const next = applyCombatAction(state, { type: 'PLAYER_CLAIM', suit: 'vigor', handCardIds: ['ph1'] }, rng, false);
+    // pool set size 2 x 1 hand card = 2 stacks granted, then immediately
+    // decayed by 1 at the end of this same player turn (see endTurn) -- same
+    // cadence the existing player-Strength/Weaken tests already exercise.
+    expect(next.playerStatuses.strength).toBe(1);
+    expect(next.playerHP).toBe(30);
+    expect(next.enemies[0].hp).toBe(20);
   });
 });
 

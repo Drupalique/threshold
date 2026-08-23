@@ -1,11 +1,15 @@
-export type IntentType = 'attack' | 'guard' | 'heal' | 'debuff' | 'corrupt';
+import type { StatusBag } from './status';
+
+export type IntentType = 'attack' | 'guard' | 'heal' | 'debuff' | 'poison' | 'strength' | 'corrupt';
 
 export type CorruptEffectType = 'add-cards' | 'block-suit' | 'force-discard';
 
 export interface IntentStep {
   type: IntentType;
-  // Damage (attack), Guard banked (guard), Room-HP restored (heal), or the
-  // fraction knocked off the player's next threat claim (debuff, 0-1).
+  // Damage (attack), Guard banked (guard), Room-HP restored (heal), Weaken
+  // stacks applied to the player (debuff), Poison stacks applied to the
+  // player (poison), or Strength stacks the enemy grants itself (strength)
+  // -- see engine/statusEffects.ts for how stacks resolve into magnitude.
   // Unused for corrupt -- see corruptEffect instead.
   magnitude?: number;
   corruptEffect?: CorruptEffectType;
@@ -40,4 +44,7 @@ export interface EnemyInstance {
   hpMax: number;
   guard: number;
   patternIndex: number;
+  // Weaken/Strength/Poison stacks this enemy currently holds (see
+  // engine/statusEffects.ts) -- decays by 1 per this enemy's own turn.
+  statuses: StatusBag;
 }

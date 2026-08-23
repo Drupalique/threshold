@@ -85,16 +85,27 @@ button {
   font-weight: 600;
 }
 
-.weaken-badge {
+/* Generic status-effect stack badges -- shared by the player's meter row
+   (CombatScreen) and every enemy card (EnemyPanel), see StatusBadges. */
+.status-badge {
   display: inline-block;
   margin-top: 0.3rem;
   margin-left: 0.35rem;
   padding: 0.1rem 0.5rem;
   border-radius: 4px;
-  background: #8e2f2f;
   color: white;
   font-size: 0.75rem;
   font-weight: 600;
+}
+
+.status-badge--weaken {
+  background: #8e2f2f;
+}
+.status-badge--poison {
+  background: #2f6b3a;
+}
+.status-badge--strength {
+  background: #a5690d;
 }
 
 /* --- Enemies --- */
@@ -187,6 +198,12 @@ button {
 }
 .enemy-intent-badge--debuff {
   background: #5a2a6b;
+}
+.enemy-intent-badge--poison {
+  background: #2f6b3a;
+}
+.enemy-intent-badge--strength {
+  background: #a5690d;
 }
 .enemy-intent-badge--corrupt {
   background: #444;

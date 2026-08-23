@@ -9,6 +9,9 @@ import {
   ON_SUIT_RATIO,
   BOON_SUIT_RATIO,
   GUARD_SUIT_RATIO,
+  WEAKEN_SUIT_RATIO,
+  POISON_SUIT_RATIO,
+  STRENGTH_SUIT_RATIO,
   PLAYER_HAND_SIZE,
   ROOM_POOL_SIZE_SMALL,
   ROOM_POOL_SIZE_LARGE,
@@ -44,6 +47,7 @@ function pickEnemies(floor: number, roomId: string, rng: Rng): EnemyInstance[] {
       hpMax: def.hpMax,
       guard: 0,
       patternIndex: 0,
+      statuses: {},
     });
   }
   return enemies;
@@ -84,6 +88,9 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
     onSuitRatio: ON_SUIT_RATIO,
     boonRatio: BOON_SUIT_RATIO,
     guardRatio: GUARD_SUIT_RATIO,
+    weakenRatio: WEAKEN_SUIT_RATIO,
+    poisonRatio: POISON_SUIT_RATIO,
+    strengthRatio: STRENGTH_SUIT_RATIO,
   };
 
   const pool = generateWeightedDeck(
@@ -94,6 +101,9 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
       onSuitRatio: params.onSuitRatio,
       boonRatio: params.boonRatio,
       guardRatio: params.guardRatio,
+      weakenRatio: params.weakenRatio,
+      poisonRatio: params.poisonRatio,
+      strengthRatio: params.strengthRatio,
     },
     rng,
   );
@@ -106,6 +116,9 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
       onSuitRatio: params.onSuitRatio,
       boonRatio: params.boonRatio,
       guardRatio: params.guardRatio,
+      weakenRatio: params.weakenRatio,
+      poisonRatio: params.poisonRatio,
+      strengthRatio: params.strengthRatio,
     },
     rng,
   );

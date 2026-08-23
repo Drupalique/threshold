@@ -1,7 +1,8 @@
-import type { SuitId } from '../types/suits';
+import type { SuitId, SuitCategory } from '../types/suits';
 import type { Card } from '../types/cards';
 import type { EnemyInstance } from '../types/enemy';
 import type { RoomInstance } from '../types/room';
+import type { StatusId } from '../types/status';
 import type {
   CombatAction,
   CombatState,
@@ -15,17 +16,28 @@ import {
   resolveForceDiscard,
 } from './surpriseEffects';
 import { currentIntent } from './roomIntent';
+import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken } from './statusEffects';
+import { STATUS_DEFS } from '../types/status';
 import {
   SUIT_DEFINITIONS,
   DECAY_TURNS_N,
   SURPRISE_BLOCK_DURATION_TURNS,
   HAND_REDRAW_EACH_TURN,
   MIN_POOL_SET_SIZE,
+  WEAKEN_PCT_PER_STACK,
 } from '../config/constants';
 
 const suitCategory = (suit: SuitId) =>
   SUIT_DEFINITIONS.find((s) => s.id === suit)!.category;
 const suitName = (suit: SuitId) => SUIT_DEFINITIONS.find((s) => s.id === suit)!.name;
+
+// Categories that act on an enemy the player picks, mirroring "threat" --
+// Hex/Venom apply their status to a chosen target the same way a threat pile
+// deals damage to one. Every other category (boon, guard, and the
+// self-targeting strength/Vigor suit) has no target at all.
+export function requiresEnemyTarget(category: SuitCategory): boolean {
+  return category === 'threat' || category === 'weaken' || category === 'poison';
+}
 
 interface MeterSnapshot {
   playerHP: number;
@@ -104,7 +116,7 @@ export function initCombat(
     playerHP,
     playerHPMax,
     playerGuard: 0,
-    playerWeakenPct: 0,
+    playerStatuses: {},
     turnNumber: 1,
     activeTurn: 'player',
     decayCounters: {},
@@ -125,6 +137,9 @@ function drawFreshHand(state: CombatState, rng: Rng, idPrefix: string): Card[] {
       onSuitRatio: params.onSuitRatio,
       boonRatio: params.boonRatio,
       guardRatio: params.guardRatio,
+      weakenRatio: params.weakenRatio,
+      poisonRatio: params.poisonRatio,
+      strengthRatio: params.strengthRatio,
     },
     rng,
   );
@@ -148,9 +163,10 @@ export function getLegalPlayerClaimTargets(state: CombatState): LegalClaimTarget
     if ((state.blockedSuits[suit] ?? 0) > 0) continue;
     const size = countPoolSetSize(state.pool, suit);
     if (size < MIN_POOL_SET_SIZE) continue;
-    if (suitCategory(suit) === 'threat') {
-      // A threat pile isn't owned by any enemy -- every alive enemy is a
-      // legal, independent target for the same pile (design doc 4.8).
+    if (requiresEnemyTarget(suitCategory(suit))) {
+      // A threat/hex/venom pile isn't owned by any enemy -- every alive
+      // enemy is a legal, independent target for the same pile (design doc
+      // 4.8, extended to the status suits in 4.9).
       for (const enemy of state.enemies) {
         targets.push({ suit, targetInstanceId: enemy.instanceId, poolSetSize: size });
       }
@@ -177,7 +193,7 @@ function isLegalClaim(
   if ((state.blockedSuits[suit] ?? 0) > 0) return false;
 
   const category = suitCategory(suit);
-  if (category === 'threat') {
+  if (requiresEnemyTarget(category)) {
     if (!targetInstanceId) return false;
     if (!state.enemies.some((e) => e.instanceId === targetInstanceId)) return false;
     return countPoolSetSize(state.pool, suit) >= MIN_POOL_SET_SIZE;
@@ -193,9 +209,14 @@ function performClaim(
 ): CombatState {
   const category = suitCategory(suit);
   const poolSetSize = countPoolSetSize(state.pool, suit);
-  const rawMagnitude = poolSetSize * handCardIds.length;
-  const weakenPct = category === 'threat' ? state.playerWeakenPct : 0;
-  const magnitude = weakenPct > 0 ? Math.max(0, Math.round(rawMagnitude * (1 - weakenPct))) : rawMagnitude;
+  const isThreat = category === 'threat';
+  // Strength/Weaken only apply to threat claims -- boon/guard claims aren't
+  // "attacks," so the player's own combat stacks don't touch them.
+  const strengthStacks = isThreat ? stacksOf(state.playerStatuses, 'strength') : 0;
+  const weakenStacks = isThreat ? stacksOf(state.playerStatuses, 'weaken') : 0;
+  const boostedBase = isThreat ? withStrength(poolSetSize, state.playerStatuses) : poolSetSize;
+  const rawMagnitude = boostedBase * handCardIds.length;
+  const magnitude = isThreat ? withWeaken(rawMagnitude, state.playerStatuses, WEAKEN_PCT_PER_STACK) : rawMagnitude;
 
   const claimedIdSet = new Set(handCardIds);
   const nextHand = state.playerHand.filter((c) => !claimedIdSet.has(c.id));
@@ -226,12 +247,38 @@ function performClaim(
   } else if (category === 'boon') {
     next = { ...next, playerHP: Math.min(state.playerHPMax, next.playerHP + magnitude) };
     effectDesc = `healing ${magnitude} HP`;
-  } else {
+  } else if (category === 'guard') {
     next = { ...next, playerGuard: next.playerGuard + magnitude };
     effectDesc = `raising Guard to ${next.playerGuard}`;
+  } else if (category === 'weaken' || category === 'poison') {
+    // Hex/Venom: the player inflicts their own status stacks on a chosen
+    // enemy, resolved by the exact same addStacks the enemy's own
+    // Debuff/Poison intents use (see engine/statusEffects.ts) -- just
+    // pointed the other direction.
+    const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId)!;
+    enemyName = enemy.name;
+    next = updateEnemy(next, enemy.instanceId, (e) => ({
+      ...e,
+      statuses: addStacks(e.statuses, category, magnitude),
+    }));
+    const totalStacks = stacksOf(
+      next.enemies.find((e) => e.instanceId === enemy.instanceId)!.statuses,
+      category,
+    );
+    effectDesc = `inflicting +${magnitude} ${STATUS_DEFS[category].name} on ${enemy.name} (${totalStacks} stack${totalStacks === 1 ? '' : 's'})`;
+  } else {
+    // Vigor: the player buffs themself, mirroring the enemy's own Strength
+    // intent (see engine/statusEffects.ts).
+    next = { ...next, playerStatuses: addStacks(next.playerStatuses, 'strength', magnitude) };
+    const totalStacks = stacksOf(next.playerStatuses, 'strength');
+    effectDesc = `gaining +${magnitude} Strength (${totalStacks} stack${totalStacks === 1 ? '' : 's'})`;
   }
 
-  const weakenNote = weakenPct > 0 ? ` (weakened -${Math.round(weakenPct * 100)}%)` : '';
+  const weakenNote =
+    weakenStacks > 0
+      ? ` (weakened -${Math.round(Math.min(1, weakenStacks * WEAKEN_PCT_PER_STACK) * 100)}% from ${weakenStacks} stack${weakenStacks === 1 ? '' : 's'})`
+      : '';
+  const strengthNote = strengthStacks > 0 ? ` (+${strengthStacks} from Strength)` : '';
   next = {
     ...next,
     log: [
@@ -240,7 +287,7 @@ function performClaim(
         next.turnNumber,
         'player',
         'claim',
-        `Player claims ${suitName(suit)}${enemyName ? ` from ${enemyName}` : ''} (set of ${poolSetSize}) with ${handCardIds.length} card(s)${weakenNote} -- ${effectDesc}.`,
+        `Player claims ${suitName(suit)}${enemyName ? ` from ${enemyName}` : ''} (set of ${poolSetSize}) with ${handCardIds.length} card(s)${weakenNote}${strengthNote} -- ${effectDesc}.`,
         snapshotOf(next),
       ),
     ],
@@ -259,7 +306,8 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
 
   switch (step.type) {
     case 'attack': {
-      const magnitude = step.magnitude ?? 0;
+      const baseMagnitude = withStrength(step.magnitude ?? 0, enemy.statuses);
+      const magnitude = withWeaken(baseMagnitude, enemy.statuses, WEAKEN_PCT_PER_STACK);
       const result = absorbDamage(next.playerHP, next.playerGuard, magnitude);
       const dealt = next.playerHP - result.hp;
       next = { ...next, playerHP: result.hp, playerGuard: result.guard };
@@ -284,9 +332,24 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
       break;
     }
     case 'debuff': {
-      const pct = step.magnitude ?? 0;
-      next = { ...next, playerWeakenPct: pct };
-      message = `${enemy.name} weakens you -- your next claim deals ${Math.round(pct * 100)}% less.`;
+      const stacks = step.magnitude ?? 0;
+      next = { ...next, playerStatuses: addStacks(next.playerStatuses, 'weaken', stacks) };
+      const totalStacks = stacksOf(next.playerStatuses, 'weaken');
+      message = `${enemy.name} weakens you -- +${stacks} Weaken (${totalStacks} stack${totalStacks === 1 ? '' : 's'}, -${Math.round(Math.min(1, totalStacks * WEAKEN_PCT_PER_STACK) * 100)}% claims).`;
+      break;
+    }
+    case 'poison': {
+      const stacks = step.magnitude ?? 0;
+      next = { ...next, playerStatuses: addStacks(next.playerStatuses, 'poison', stacks) };
+      const totalStacks = stacksOf(next.playerStatuses, 'poison');
+      message = `${enemy.name} poisons you -- +${stacks} Poison (${totalStacks} stack${totalStacks === 1 ? '' : 's'}).`;
+      break;
+    }
+    case 'strength': {
+      const stacks = step.magnitude ?? 0;
+      next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, statuses: addStacks(e.statuses, 'strength', stacks) }));
+      const totalStacks = stacksOf(next.enemies.find((e) => e.instanceId === enemy.instanceId)!.statuses, 'strength');
+      message = `${enemy.name} hardens itself -- +${stacks} Strength (${totalStacks} stack${totalStacks === 1 ? '' : 's'}).`;
       break;
     }
     case 'corrupt': {
@@ -324,8 +387,42 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
     }
   }
 
-  next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, patternIndex: e.patternIndex + 1 }));
-  next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'enemy', step.type, message, snapshotOf(next))] };
+  // Tick this enemy's own statuses once, at the true end of its own turn --
+  // same cadence its pattern index advances at, and (per statusEffects.ts)
+  // the same phase-boundary discipline decayCounters/blockedSuits already
+  // follow: once per actor turn, never per sub-effect within it. A Poison
+  // tick can drop this enemy to 0 HP; it's left in the array as a "corpse"
+  // rather than removed here -- removing it now would shrink `enemies` and
+  // desync activeEnemyIndex against enemies still owed a turn this round
+  // (see endTurn's round-end sweep, the one safe place to actually drop it).
+  const postStep = next.enemies.find((e) => e.instanceId === enemy.instanceId)!;
+  const { statuses: tickedStatuses, poisonDamage } = tickStatuses(postStep.statuses);
+  let tickedHp = postStep.hp;
+  let tickedGuard = postStep.guard;
+  let poisonMessage = '';
+  if (poisonDamage > 0) {
+    const result = absorbDamage(tickedHp, tickedGuard, poisonDamage);
+    const dealt = tickedHp - result.hp;
+    tickedHp = result.hp;
+    tickedGuard = result.guard;
+    poisonMessage =
+      result.absorbed > 0
+        ? ` ${enemy.name}'s poison deals ${poisonDamage} -- Guard absorbs ${result.absorbed}, ${dealt} gets through.`
+        : ` ${enemy.name}'s poison deals ${dealt}.`;
+    if (tickedHp <= 0) poisonMessage += ` ${enemy.name} is defeated!`;
+  }
+
+  next = updateEnemy(next, enemy.instanceId, (e) => ({
+    ...e,
+    hp: tickedHp,
+    guard: tickedGuard,
+    statuses: tickedStatuses,
+    patternIndex: e.patternIndex + 1,
+  }));
+  next = {
+    ...next,
+    log: [...next.log, makeLog(next.turnNumber, 'enemy', step.type, `${message}${poisonMessage}`, snapshotOf(next))],
+  };
 
   if (next.playerHP <= 0) {
     next = { ...next, status: 'player-dead' };
@@ -374,6 +471,7 @@ function tickDecay(state: CombatState): CombatState {
 
     let playerHP = next.playerHP;
     let playerGuard = next.playerGuard;
+    let playerStatuses = next.playerStatuses;
     let enemies = next.enemies;
     const parts: string[] = [];
 
@@ -402,12 +500,25 @@ function tickDecay(state: CombatState): CombatState {
         parts.push(`${e.name} heals ${healed}`);
         return { ...e, hp: e.hp + healed };
       });
-    } else {
+    } else if (category === 'guard') {
       playerGuard += magnitude;
       parts.push(`you gain ${magnitude} Guard`);
       enemies = enemies.map((e) => {
         parts.push(`${e.name} gains ${magnitude} Guard`);
         return { ...e, guard: e.guard + magnitude };
+      });
+    } else {
+      // Hex/Venom/Vigor decay: same "hits everyone, untargeted" symmetry as
+      // threat/boon/guard above -- a Poison pile left to decay poisons the
+      // player as much as every enemy, exactly like a decaying threat pile
+      // damages both alike.
+      const statusId: StatusId = category;
+      const statusLabel = STATUS_DEFS[statusId].name;
+      playerStatuses = addStacks(playerStatuses, statusId, magnitude);
+      parts.push(`you gain +${magnitude} ${statusLabel}`);
+      enemies = enemies.map((e) => {
+        parts.push(`${e.name} gains +${magnitude} ${statusLabel}`);
+        return { ...e, statuses: addStacks(e.statuses, statusId, magnitude) };
       });
     }
 
@@ -417,6 +528,7 @@ function tickDecay(state: CombatState): CombatState {
       ...next,
       playerHP,
       playerGuard,
+      playerStatuses,
       enemies,
       pool,
       decayCounters: nextDecayCounters,
@@ -506,6 +618,14 @@ function endTurn(
     next = tickDecay(next);
     if (next.status !== 'active') return next;
 
+    // A Poison tick during this enemy phase can have left a 0-HP "corpse" in
+    // the array (see resolveEnemyTurn) -- round-end is the first safe point
+    // to actually drop it, since activeEnemyIndex arithmetic during the
+    // phase assumes the array only shrinks between rounds.
+    if (next.enemies.some((e) => e.hp <= 0)) {
+      next = { ...next, enemies: next.enemies.filter((e) => e.hp > 0) };
+    }
+
     if (next.enemies.length === 0) {
       return { ...next, status: 'room-cleared' };
     }
@@ -523,6 +643,9 @@ function endTurn(
         onSuitRatio: next.roomParams.onSuitRatio,
         boonRatio: next.roomParams.boonRatio,
         guardRatio: next.roomParams.guardRatio,
+        weakenRatio: next.roomParams.weakenRatio,
+        poisonRatio: next.roomParams.poisonRatio,
+        strengthRatio: next.roomParams.strengthRatio,
       },
       rng,
     );
@@ -537,15 +660,47 @@ function endTurn(
     // Player's turn just ended -- this is the only point a block's
     // countdown ticks (a block set mid-enemy-phase must survive intact
     // through to the player's next turn, not get decremented away in the
-    // very same endTurn call that just created it). Weaken expires here
-    // too, whether or not it was used, and the enemy phase begins at index 0.
+    // very same endTurn call that just created it). The player's own
+    // statuses tick here too, whether or not they were used this turn: a
+    // Poison stack deals its damage now, then every stack decays by 1, and
+    // the enemy phase begins at index 0.
+    const { statuses: tickedStatuses, poisonDamage } = tickStatuses(next.playerStatuses);
+    let playerHP = next.playerHP;
+    let playerGuard = next.playerGuard;
+    let log = next.log;
+    if (poisonDamage > 0) {
+      const result = absorbDamage(playerHP, playerGuard, poisonDamage);
+      const dealt = playerHP - result.hp;
+      playerHP = result.hp;
+      playerGuard = result.guard;
+      log = [
+        ...log,
+        makeLog(
+          next.turnNumber,
+          'system',
+          'poison',
+          result.absorbed > 0
+            ? `Poison deals ${poisonDamage} -- Guard absorbs ${result.absorbed}, you take ${dealt}.`
+            : `Poison deals ${dealt}.`,
+          { playerHP, playerHPMax: next.playerHPMax, playerGuard },
+        ),
+      ];
+    }
+
+    if (playerHP <= 0) {
+      return { ...next, playerHP: 0, playerGuard, playerStatuses: tickedStatuses, log, status: 'player-dead' };
+    }
+
     return {
       ...next,
+      playerHP,
+      playerGuard,
+      playerStatuses: tickedStatuses,
+      log,
       blockedSuits: decrementBlocked(next.blockedSuits),
       activeTurn: 'enemy',
       activeEnemyIndex: 0,
       turnNumber: next.turnNumber + 1,
-      playerWeakenPct: 0,
     };
   }
 

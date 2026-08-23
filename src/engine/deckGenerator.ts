@@ -2,7 +2,7 @@ import type { SuitId } from '../types/suits';
 import type { Card } from '../types/cards';
 import type { Rng } from './rng';
 import { weightedPick, uniformPick } from './weightedPick';
-import { BOON_SUIT, GUARD_SUIT } from '../config/constants';
+import { BOON_SUIT, GUARD_SUIT, WEAKEN_SUIT, POISON_SUIT, STRENGTH_SUIT } from '../config/constants';
 
 export interface DeckParams {
   // The threat suits eligible for the "on-suit" bucket -- a property of the
@@ -14,9 +14,15 @@ export interface DeckParams {
   onSuitRatio: number;
   boonRatio: number;
   guardRatio: number;
+  // Status suits (Hex/Venom/Vigor) -- optional, defaulting to 0, so callers
+  // that don't care about them (e.g. surpriseEffects's add-cards, which only
+  // ever wants on-suit) don't have to spell out three zeroes.
+  weakenRatio?: number;
+  poisonRatio?: number;
+  strengthRatio?: number;
 }
 
-type CardCategory = 'on-suit' | 'boon' | 'guard';
+type CardCategory = 'on-suit' | 'boon' | 'guard' | 'weaken' | 'poison' | 'strength';
 
 /**
  * Builds a weighted-random deck of `count` cards. Used identically for the
@@ -32,9 +38,12 @@ export function generateWeightedDeck(
   params: DeckParams,
   rng: Rng,
 ): Card[] {
+  const weakenRatio = params.weakenRatio ?? 0;
+  const poisonRatio = params.poisonRatio ?? 0;
+  const strengthRatio = params.strengthRatio ?? 0;
   const remainder = Math.max(
     0,
-    1 - params.onSuitRatio - params.boonRatio - params.guardRatio,
+    1 - params.onSuitRatio - params.boonRatio - params.guardRatio - weakenRatio - poisonRatio - strengthRatio,
   );
   const onSuitWeight = params.onSuitRatio + remainder;
 
@@ -42,6 +51,9 @@ export function generateWeightedDeck(
     { weight: onSuitWeight, value: 'on-suit' },
     { weight: params.boonRatio, value: 'boon' },
     { weight: params.guardRatio, value: 'guard' },
+    { weight: weakenRatio, value: 'weaken' },
+    { weight: poisonRatio, value: 'poison' },
+    { weight: strengthRatio, value: 'strength' },
   ];
 
   const cards: Card[] = [];
@@ -59,6 +71,15 @@ export function generateWeightedDeck(
         break;
       case 'guard':
         cards.push({ id, kind: 'creature', suit: GUARD_SUIT });
+        break;
+      case 'weaken':
+        cards.push({ id, kind: 'creature', suit: WEAKEN_SUIT });
+        break;
+      case 'poison':
+        cards.push({ id, kind: 'creature', suit: POISON_SUIT });
+        break;
+      case 'strength':
+        cards.push({ id, kind: 'creature', suit: STRENGTH_SUIT });
         break;
     }
   }

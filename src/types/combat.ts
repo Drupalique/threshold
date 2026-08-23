@@ -2,6 +2,7 @@ import type { SuitId } from './suits';
 import type { Card } from './cards';
 import type { EnemyInstance } from './enemy';
 import type { RoomParams } from './room';
+import type { StatusBag } from './status';
 
 export type CombatActor = 'player' | 'enemy';
 
@@ -39,10 +40,10 @@ export interface CombatState {
   // (see endTurn's guard-fade handling) -- the player's exclusive
   // defensive tool, banked via the Ward suit.
   playerGuard: number;
-  // Fraction (0-1) knocked off the magnitude of the player's next threat
-  // claim, set by an enemy's Debuff step. Expires at the end of the
-  // player's next turn whether or not it was used.
-  playerWeakenPct: number;
+  // Weaken/Strength/Poison stacks the player currently holds (see
+  // engine/statusEffects.ts) -- decays by 1 stack at the end of every
+  // player turn, whether or not a given stack was used.
+  playerStatuses: StatusBag;
   turnNumber: number;
   activeTurn: CombatActor;
   // Keyed by suit -- pool sets are suit-level, not owned by any one enemy.

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRun } from '../../state/runContextObject';
 import type { Card } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { getLegalPlayerClaimTargets } from '../../engine/combatEngine';
+import { getLegalPlayerClaimTargets, requiresEnemyTarget } from '../../engine/combatEngine';
 import {
   SUIT_DEFINITIONS,
   TURN_ANIMATION_DELAY_MS,
@@ -12,7 +12,7 @@ import { useLogPlayback } from '../hooks/useLogPlayback';
 import { MeterBar } from '../components/MeterBar';
 import { PoolDisplay } from '../components/PoolDisplay';
 import { HandDisplay } from '../components/HandDisplay';
-import { EnemyPanel } from '../components/EnemyPanel';
+import { EnemyPanel, StatusBadges } from '../components/EnemyPanel';
 import { ClaimControls } from '../components/ClaimControls';
 import { TurnLogFeed } from '../components/TurnLogFeed';
 import { BlockedSuitBanner } from '../components/BlockedSuitBanner';
@@ -86,10 +86,10 @@ export function CombatScreen() {
       : [],
   );
   const needsTarget = targetableInstanceIds.size > 1 && !selectedTargetInstanceId;
-  // Boon/guard suits have no target; threat suits auto-resolve onto the
-  // lone survivor when exactly one enemy is alive.
+  // Boon/guard/Vigor suits have no target; threat/Hex/Venom suits auto-
+  // resolve onto the lone survivor when exactly one enemy is alive.
   const suitNeedsNoTarget = selectedSuit
-    ? SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.category !== 'threat'
+    ? !requiresEnemyTarget(SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.category)
     : true;
 
   function handleCardClick(card: Card) {
@@ -202,9 +202,7 @@ export function CombatScreen() {
       <div className="combat-player-stats meter-with-badge">
         <MeterBar label="Player HP" value={displayedPlayerHP} max={displayedPlayerHPMax} color="#27ae60" />
         {displayedPlayerGuard > 0 && <div className="guard-badge">Guard {displayedPlayerGuard}</div>}
-        {combat.playerWeakenPct > 0 && (
-          <div className="weaken-badge">Weakened -{Math.round(combat.playerWeakenPct * 100)}%</div>
-        )}
+        <StatusBadges statuses={combat.playerStatuses} />
       </div>
     </div>
   );

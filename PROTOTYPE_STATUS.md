@@ -1,13 +1,13 @@
 # THRESHOLD Prototype — Status
 
-_Last updated: 2026-08-22. Companion to `threshold-prototype-design.md` (the design doc, source of truth for intent/scope) — this file records what's actually built, where it currently diverges from that doc, and how to pick the work back up._
+_Last updated: 2026-08-23. Companion to `threshold-prototype-design.md` (the design doc, source of truth for intent/scope) — this file records what's actually built, where it currently diverges from that doc, and how to pick the work back up._
 
 ## Running it
 
 ```
 npm install       # first time only
 npm run dev        # dev server at http://localhost:5173/
-npm test            # vitest, engine layer only (25 tests)
+npm test            # vitest, engine layer only (33 tests)
 npx tsc -b            # typecheck
 npx eslint .            # lint
 ```
@@ -19,13 +19,15 @@ No build/deploy step exists or is needed — this is a local-only playtest build
 Full v0.1 scope from the design doc's Section 6, with the room-opponent model replaced wholesale by Section 4.7 (enemies, not a room hand) partway through playtesting:
 
 - **Player-side Earthquake combat, unchanged from the original design:** shared pool, player hand (5 cards, redrawn each of the player's turns), multiplicative claim formula (`pool set size x hand cards played`), threat/boon/guard suit effects.
-- **Enemy-based opposition (design doc 4.7):** each room holds 1-3 individually-tracked enemies drawn from a small static roster (`src/config/enemies.ts`), each with its own HP pool and a **fixed, repeating ability pattern** (Attack / Guard / Heal / Debuff / Corrupt) telegraphed one step ahead. Enemies never draw a hand or claim from the pool -- claiming is exclusively a player action.
+- **Enemy-based opposition (design doc 4.7):** each room holds 1-3 individually-tracked enemies drawn from a small static roster (`src/config/enemies.ts`), each with its own HP pool and a **fixed, repeating ability pattern** (Attack / Guard / Heal / Debuff / Poison / Strength / Corrupt) telegraphed one step ahead. Enemies never draw a hand or claim from the pool -- claiming is exclusively a player action.
+- **Unified status-effect framework:** Weaken, Strength, and Poison are stack counts on a shared `StatusBag` (`src/types/status.ts`, `src/engine/statusEffects.ts`) held by the player or any enemy instance, decaying by 1 stack per holder turn -- see "Status effects" below.
+- **Player-facing status suits (design doc 4.9's carried-forward next step, now built):** Hex and Venom claims inflict Weaken/Poison stacks on a chosen enemy the same way a threat claim deals damage to one; Vigor claims grant the player Strength stacks the same way Grace heals -- see "Status suits" below.
 - **Pool piles and enemies are decoupled (design doc 4.8):** enemies carry no suit at all. A room's pool draws from `RoomParams.threatSuits`, chosen independently of which enemies are present (currently keyed off the room's size band -- 1 threat suit for a small room, 2 for a large one). A threat claim can be aimed at **any** alive enemy regardless of suit (prompted in the UI whenever 2+ enemies are alive, not just when duplicates share a suit). A room clears when every enemy's HP has independently reached 0.
 - **Decay redesign:** a pile left unclaimed for `DECAY_TURNS_N` turns no longer applies a flat Player HP penalty. It resolves its own suit's effect at magnitude equal to just its own pile size (no hand-card multiplier), landing on **every entity in the room** -- the player and every alive enemy alike. A decaying threat pile hurts everyone; a decaying boon pile heals everyone, enemies included; a decaying guard pile shields everyone. This is what makes claiming meaningfully better than waiting: only a claim lets you pick a target and multiply the effect.
 - Floor-gated enemy eligibility (`EnemyDef.minFloor`) -- the "harder enemies appear as floors increase" knob, selection currently uniform among eligible defs (see Open threads).
 - Placeholder door system: size + color + texture tags, each independently rolled against the real next room at a 75% correlation rate. Texture now correlates with "does this room contain a Corrupt-capable enemy" (previously: presence of a random pool-embedded surprise card, which no longer exists).
 - Linear 10-room run, win/loss end screens with a trailing log, restart.
-- 6 suits (4 threat: Wolf/Ember/Rot/Spider, 1 boon: Grace, 1 guard: Ward), data-driven in `src/config/constants.ts`.
+- 9 suits (4 threat: Wolf/Ember/Rot/Spider, 1 boon: Grace, 1 guard: Ward, 3 status: Hex/Venom/Vigor), data-driven in `src/config/constants.ts`.
 
 Architecture: pure, framework-free engine (`src/engine/`) driving a thin React reducer bridge (`src/state/RunContext.tsx`) and a component UI (`src/ui/`). See the file tree in-repo for the full module breakdown.
 
@@ -35,10 +37,36 @@ Four `EnemyDef`s for the prototype's placeholder scope (design doc Section 6's t
 
 | Enemy | HP | Min floor | Pattern (fixed cycle) |
 |---|---|---|---|
-| Wolf-kin | 14 | 1 | Attack 4 -> Corrupt (force-discard) -> Attack 4 -> Guard 5 |
+| Wolf-kin | 14 | 1 | Attack 4 -> Corrupt (force-discard) -> Attack 4 -> Strength 3 |
 | Ember Wretch | 16 | 1 | Attack 3 -> Corrupt (block-suit) -> Attack 5 |
-| Rot Husk | 18 | 2 | Debuff 30% -> Attack 4 -> Heal 4 |
-| Spider Broodmother | 22 | 3 | Corrupt (add-cards) -> Attack 6 -> Attack 6 -> Guard 6 |
+| Rot Husk | 18 | 2 | Debuff 3 (Weaken stacks) -> Attack 4 -> Heal 4 |
+| Spider Broodmother | 22 | 3 | Corrupt (add-cards) -> Attack 6 -> Poison 4 -> Guard 6 |
+
+Wolf-kin's old Guard 5 step became Strength 3 (demonstrates the Strength status) and one of Spider Broodmother's two Attack 6 steps became Poison 4 (demonstrates the Poison status) -- see the "Status effects" section below. Both are first-cut substitutions, not a balance pass.
+
+## Status effects (`src/types/status.ts`, `src/engine/statusEffects.ts`)
+
+Weaken, Strength, and Poison are now a single unified framework: a `StatusBag` (stack counts keyed by status) lives on both the player (`CombatState.playerStatuses`) and every `EnemyInstance.statuses`, and the exact same functions (`withWeaken`, `withStrength`, `tickStatuses`) resolve them regardless of who's holding them.
+
+- **Weaken**: knocks `WEAKEN_PCT_PER_STACK` (10%) off an outgoing threat claim/attack per stack, capped at 100%. Previously a single flat fraction the enemy set on the player that unconditionally cleared after exactly one player turn (design doc 4.7's Debuff step); now a stack count that decays by 1 per holder turn instead of vanishing outright, and can in principle land on an enemy (a Weaken-inflicting player tool) exactly as it lands on the player today, since the same function computes both.
+- **Strength**: adds `+N` flat damage per stack to an attack's base, before any hand-card multiplier -- for a player threat claim this folds into the pool-set-size term (`(poolSetSize + strength) x handCards`), so it's disproportionately valuable on a small pool set, by design (a deliberate lever for making a bad pool read still matter).
+- **Poison**: deals its current stack count as damage to its own holder, then decays by 1 -- a DoT, resolved once per holder turn.
+
+All three decay by exactly 1 stack at the true end of a holder's own turn (the player's turn, or one enemy's dispatched action) -- never per sub-action, matching the existing decayCounters/blockedSuits phase-boundary discipline from design doc 4.7. An enemy that's poisoned to 0 HP by its own tick mid-enemy-phase is kept as a 0-HP "corpse" in `enemies[]` until the round concludes (removing it immediately would desync `activeEnemyIndex` against enemies still owed a turn that round) -- see `combatEngine.ts`'s round-end sweep in `endTurn`.
+
+The enemy side grants these via its pattern (Rot Husk's Debuff, Wolf-kin's Strength step, Spider Broodmother's Poison step); the player side now grants them via the three status suits below.
+
+## Status suits (Hex, Venom, Vigor)
+
+The player-facing mirror of the enemy's own Debuff/Poison/Strength intents, added on top of the status framework above. A claim in one of these suits resolves through `addStacks` exactly like an enemy's own status-granting step does -- same magnitude formula (`poolSetSize x handCards`) as every other suit, just landing in a `StatusBag` instead of as HP damage/healing/Guard.
+
+- **Hex** (category `weaken`) -- targeted like a threat claim: the player picks which alive enemy to inflict Weaken stacks on. No target, no legal claim (see `requiresEnemyTarget` in `combatEngine.ts`).
+- **Venom** (category `poison`) -- targeted the same way; inflicts Poison stacks on the chosen enemy, which then deal damage on that enemy's own next turn tick, same as the player's own Poison.
+- **Vigor** (category `strength`) -- untargeted like Grace/Ward: grants Strength stacks to the player themself.
+
+None of the three get the claim's own Strength/Weaken bonus (same rule as boon/guard -- see `performClaim`'s `isThreat` gate): inflicting a debuff isn't itself an "attack" the player's own buffs should scale. Each has its own pool/hand draw ratio (`WEAKEN_SUIT_RATIO`/`POISON_SUIT_RATIO`/`STRENGTH_SUIT_RATIO` = 0.08 each, mirroring `GUARD_SUIT_RATIO`'s "rarer than boon" weighting), and each decays symmetrically like every other suit: a Hex/Venom/Vigor pile left unclaimed for `DECAY_TURNS_N` turns grants its stacks to **everyone in the room** (player and every alive enemy alike) at magnitude = pile size, same "hits everyone, untargeted" rule threat/boon/guard decay already followed.
+
+First-cut ratios and suit-to-status mapping, not balance-tested -- see Open threads.
 
 ## Deviations from the v0.2 design doc
 
@@ -78,11 +106,15 @@ THREAT_SUIT_COUNT_BY_SIZE_BAND = { small: 1, large: 2 }  # design doc 4.8 -- roo
 ON_SUIT_RATIO = 0.45                # deviation #4 -- single most important balance knob
 BOON_SUIT_RATIO = 0.12
 GUARD_SUIT_RATIO = 0.08
+WEAKEN_SUIT_RATIO = 0.08            # Hex -- see "Status suits" above
+POISON_SUIT_RATIO = 0.08            # Venom
+STRENGTH_SUIT_RATIO = 0.08          # Vigor
 PLAYER_HP_MAX = 30
 DECAY_TURNS_N = 3
 MIN_POOL_SET_SIZE = 1               # deviation #2
 SURPRISE_ADD_CARDS_COUNT = 2
 SURPRISE_BLOCK_DURATION_TURNS = 1
+WEAKEN_PCT_PER_STACK = 0.1          # see "Status effects" above
 DOOR_CORRELATION_RATE = 0.75
 RUN_MAX_DEPTH = 10
 TURN_ANIMATION_DELAY_MS = 600       # UI pacing only, not engine
@@ -104,4 +136,6 @@ Full door glyph-field/tree encoding, convergent nodes, artifacts, meta-progressi
 - **Enemy stat-block magnitudes (HP, Attack/Guard/Heal numbers) are a first cut**, not yet balanced against the player's claim-formula output at `ON_SUIT_RATIO = 0.45`. Watch specifically whether multi-enemy rooms (2-3 at once) are harder than intended, since Attack damage is no longer capped by a shared meter the way Room Threat used to cap total incoming room damage per round.
 - **The decay redesign is unplayed.** Does "a decaying boon pile heals the enemies too" read as an interesting claim-now tension, or just feel bad/confusing the first time it happens to a player? This was a deliberate departure from a flat penalty and hasn't been through a playtest pass yet.
 - **The pool/enemy decoupling (design doc 4.8) is unplayed.** The target-picker now fires on nearly every multi-enemy threat claim instead of the rare same-suit-duplicate case -- confirm that's still a lightweight prompt and not friction, and whether "any pile, any target" reads as a clean tactical widening or removes texture from "this pile is this enemy's problem." Also unconfirmed: whether 1-vs-2 threat suits by size band is the right room-type lever, and whether pool suit variety should correlate with the specific enemies present at all (currently fully independent by design).
+- **The Weaken/Strength/Poison status framework, and the Hex/Venom/Vigor suits that let the player inflict/grant them, are unplayed.** Open questions: do the 0.08 draw ratios feel right relative to Guard's 0.08 and Grace's 0.12, does a decaying Hex/Venom pile weakening/poisoning *the player too* read as an interesting tension or just feel bad the first time it happens (same open question the boon/guard decay symmetry already raised), and is "no Strength/Weaken bonus applies to a status-suit claim" (the `isThreat` gate) the right call or should the player's own Strength boost how many Weaken/Poison stacks a Hex/Venom claim inflicts?
+- **Wolf-kin's Strength swap and Spider Broodmother's Poison swap are unbalanced first cuts**, not confirmed by playtesting -- see the roster table above.
 - No known bugs at time of writing; last fixed issue during this pass was a blocked-suit countdown that was decrementing in the same `endTurn` call that had just set it via Corrupt, silently unblocking a suit the instant it was blocked (fixed by only ticking the countdown at the true end of the player's turn, not on every enemy sub-action).
