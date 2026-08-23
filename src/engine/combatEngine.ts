@@ -1,5 +1,6 @@
 import type { SuitId, SuitCategory } from '../types/suits';
 import type { Card } from '../types/cards';
+import { isCreatureCard } from '../types/cards';
 import type { EnemyInstance } from '../types/enemy';
 import type { RoomInstance } from '../types/room';
 import type { StatusId } from '../types/status';
@@ -25,6 +26,8 @@ import {
   HAND_REDRAW_EACH_TURN,
   MIN_POOL_SET_SIZE,
   WEAKEN_PCT_PER_STACK,
+  PLAYS_PER_TURN_BASE,
+  QUAKE_CARD_RATIO,
 } from '../config/constants';
 
 const suitCategory = (suit: SuitId) =>
@@ -61,7 +64,7 @@ function makeLog(
 }
 
 function countPoolSetSize(pool: Card[], suit: SuitId): number {
-  return pool.filter((c) => c.suit === suit).length;
+  return pool.filter((c) => isCreatureCard(c) && c.suit === suit).length;
 }
 
 interface LiveSet {
@@ -71,7 +74,10 @@ interface LiveSet {
 
 function liveSets(pool: Card[]): LiveSet[] {
   const map = new Map<SuitId, number>();
-  for (const c of pool) map.set(c.suit, (map.get(c.suit) ?? 0) + 1);
+  for (const c of pool) {
+    if (!isCreatureCard(c)) continue;
+    map.set(c.suit, (map.get(c.suit) ?? 0) + 1);
+  }
   return Array.from(map.entries())
     .map(([suit, size]) => ({ suit, size }))
     .filter((s) => s.size >= MIN_POOL_SET_SIZE);
@@ -119,6 +125,8 @@ export function initCombat(
     playerStatuses: {},
     turnNumber: 1,
     activeTurn: 'player',
+    playsRemaining: PLAYS_PER_TURN_BASE,
+    unlimitedPlaysThisTurn: false,
     decayCounters: {},
     blockedSuits: {},
     log: [makeLog(0, 'system', 'round-start', `Threat looms: ${enemyList}. The pool is set.`, snapshot)],
@@ -140,6 +148,7 @@ function drawFreshHand(state: CombatState, rng: Rng, idPrefix: string): Card[] {
       weakenRatio: params.weakenRatio,
       poisonRatio: params.poisonRatio,
       strengthRatio: params.strengthRatio,
+      quakeRatio: QUAKE_CARD_RATIO,
     },
     rng,
   );
@@ -155,8 +164,15 @@ export interface LegalClaimTarget {
 
 /** Every (suit, target) pair the player currently holds a matching, unblocked, live claim for -- UI legality preview. */
 export function getLegalPlayerClaimTargets(state: CombatState): LegalClaimTarget[] {
+  // No plays left this turn (and no Quake card in play to lift the cap) --
+  // every claim is illegal until the player passes.
+  if (state.playsRemaining <= 0 && !state.unlimitedPlaysThisTurn) return [];
+
   const suits = new Set<SuitId>();
-  for (const card of state.playerHand) suits.add(card.suit);
+  for (const card of state.playerHand) {
+    if (card.kind !== 'creature') continue;
+    suits.add(card.suit);
+  }
 
   const targets: LegalClaimTarget[] = [];
   for (const suit of suits) {
@@ -183,12 +199,13 @@ function isLegalClaim(
   targetInstanceId: string | undefined,
   handCardIds: string[],
 ): boolean {
+  if (state.playsRemaining <= 0 && !state.unlimitedPlaysThisTurn) return false;
   if (handCardIds.length === 0) return false;
   const uniqueIds = new Set(handCardIds);
   if (uniqueIds.size !== handCardIds.length) return false;
   for (const id of uniqueIds) {
     const card = state.playerHand.find((c) => c.id === id);
-    if (!card || card.suit !== suit) return false;
+    if (!card || card.kind !== 'creature' || card.suit !== suit) return false;
   }
   if ((state.blockedSuits[suit] ?? 0) > 0) return false;
 
@@ -220,7 +237,7 @@ function performClaim(
 
   const claimedIdSet = new Set(handCardIds);
   const nextHand = state.playerHand.filter((c) => !claimedIdSet.has(c.id));
-  const nextPool = state.pool.filter((c) => c.suit !== suit);
+  const nextPool = state.pool.filter((c) => !isCreatureCard(c) || c.suit !== suit);
 
   let next: CombatState = { ...state, pool: nextPool, playerHand: nextHand };
 
@@ -465,7 +482,7 @@ function tickDecay(state: CombatState): CombatState {
 
     const magnitude = set.size;
     const category = suitCategory(set.suit);
-    const pool = next.pool.filter((c) => c.suit !== set.suit);
+    const pool = next.pool.filter((c) => !isCreatureCard(c) || c.suit !== set.suit);
     const nextDecayCounters = { ...next.decayCounters };
     delete nextDecayCounters[set.suit];
 
@@ -574,6 +591,12 @@ function endTurn(
   state: CombatState,
   rng: Rng,
   handRedrawEachTurn: boolean = HAND_REDRAW_EACH_TURN,
+  // True when a just-resolved PLAYER_CLAIM left the player with more plays
+  // this turn (or unlimited plays are active) -- skips the player-turn-end
+  // machinery below (status ticks, blocked-suit countdown, the flip to the
+  // enemy phase) so the same player turn simply continues. Never set for
+  // PLAYER_PASS or ENEMY_TURN, which always end their actor's turn outright.
+  continuePlayerTurn: boolean = false,
 ): CombatState {
   if (state.status !== 'active') return state;
 
@@ -656,6 +679,15 @@ function endTurn(
     };
   }
 
+  if (state.activeTurn === 'player' && continuePlayerTurn) {
+    // The just-resolved claim left plays remaining (or unlimited plays are
+    // active) -- the player's turn isn't over, so none of the turn-end
+    // machinery below (status ticks, blocked-suit countdown, the flip to
+    // the enemy phase) runs yet. Only the dry-pool refill above still
+    // applies mid-turn.
+    return next;
+  }
+
   if (state.activeTurn === 'player') {
     // Player's turn just ended -- this is the only point a block's
     // countdown ticks (a block set mid-enemy-phase must survive intact
@@ -701,6 +733,12 @@ function endTurn(
       activeTurn: 'enemy',
       activeEnemyIndex: 0,
       turnNumber: next.turnNumber + 1,
+      // Plays only matter during the player's own turn -- cleared here so a
+      // stray Quake effect can't leak into bookkeeping across the enemy
+      // phase; both are reset properly when control returns to the player
+      // below.
+      playsRemaining: 0,
+      unlimitedPlaysThisTurn: false,
     };
   }
 
@@ -737,6 +775,11 @@ function endTurn(
     activeTurn: 'player',
     activeEnemyIndex: 0,
     turnNumber: newTurnNumber,
+    // A fresh player turn -- reset the plays budget (see
+    // CombatState.playsRemaining's doc comment for the future relic/buff
+    // hook point) and clear any unlimited-plays grant from the prior turn.
+    playsRemaining: PLAYS_PER_TURN_BASE,
+    unlimitedPlaysThisTurn: false,
   };
 }
 
@@ -753,8 +796,38 @@ export function applyCombatAction(
   if (action.type === 'PLAYER_CLAIM') {
     if (state.activeTurn !== 'player') return state;
     if (!isLegalClaim(state, action.suit, action.targetInstanceId, action.handCardIds)) return state;
-    const claimed = performClaim(state, action.suit, action.targetInstanceId, action.handCardIds);
-    return endTurn(claimed, rng, handRedrawEachTurn);
+    let claimed = performClaim(state, action.suit, action.targetInstanceId, action.handCardIds);
+    // Unlimited plays (Quake) never spend down; otherwise this claim spends
+    // exactly one of the turn's plays regardless of how many hand cards it
+    // used.
+    if (!claimed.unlimitedPlaysThisTurn) {
+      claimed = { ...claimed, playsRemaining: claimed.playsRemaining - 1 };
+    }
+    const turnContinues = claimed.unlimitedPlaysThisTurn || claimed.playsRemaining > 0;
+    return endTurn(claimed, rng, handRedrawEachTurn, turnContinues);
+  }
+
+  if (action.type === 'PLAYER_PLAY_QUAKE') {
+    if (state.activeTurn !== 'player') return state;
+    const card = state.playerHand.find((c) => c.id === action.cardId);
+    if (!card || card.kind !== 'quake') return state;
+    // A free action -- doesn't spend a play and never ends the turn itself;
+    // only Pass (or running out of plays without this card) does that.
+    return {
+      ...state,
+      playerHand: state.playerHand.filter((c) => c.id !== action.cardId),
+      unlimitedPlaysThisTurn: true,
+      log: [
+        ...state.log,
+        makeLog(
+          state.turnNumber,
+          'player',
+          'quake',
+          'Player unleashes the Quake card -- unlimited plays this turn!',
+          snapshotOf(state),
+        ),
+      ],
+    };
   }
 
   if (action.type === 'PLAYER_PASS') {

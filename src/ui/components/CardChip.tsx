@@ -9,9 +9,9 @@ interface CardChipProps {
 }
 
 export function CardChip({ card, selected, disabled, onClick }: CardChipProps) {
-  const suitDef = SUIT_DEFINITIONS.find((s) => s.id === card.suit)!;
   const classes = [
     'card-chip',
+    card.kind === 'quake' ? 'card-chip--quake' : '',
     selected ? 'card-chip--selected' : '',
     onClick && !disabled ? 'card-chip--clickable' : '',
     disabled ? 'card-chip--disabled' : '',
@@ -19,6 +19,15 @@ export function CardChip({ card, selected, disabled, onClick }: CardChipProps) {
     .filter(Boolean)
     .join(' ');
 
+  if (card.kind === 'quake') {
+    return (
+      <button type="button" className={classes} onClick={onClick} disabled={disabled || !onClick}>
+        Quake
+      </button>
+    );
+  }
+
+  const suitDef = SUIT_DEFINITIONS.find((s) => s.id === card.suit)!;
   return (
     <button
       type="button"

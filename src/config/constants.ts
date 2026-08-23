@@ -124,6 +124,23 @@ export const MIN_POOL_SET_SIZE = 1;
 export const SURPRISE_ADD_CARDS_COUNT = 2;
 export const SURPRISE_BLOCK_DURATION_TURNS = 1;
 
+// --- Plays per turn ----------------------------------------------------
+// How many separate set-claims the player may make in a single turn before
+// it passes to the enemy phase, distinct from MIN_POOL_SET_SIZE (which
+// gates whether any one claim is legal at all). This is the hook point for
+// future temporary buffs/debuffs or per-run relics that grant (or cost) a
+// play -- for now the only modifier is the Quake card's unlimited-plays
+// effect (see CombatState.unlimitedPlaysThisTurn).
+export const PLAYS_PER_TURN_BASE = 2;
+
+// Odds a freshly drawn hand card (initial deal or a turn's redraw) is a
+// Quake card instead of an ordinary suited one -- deliberately rarer than
+// every suit ratio above, since unlimited plays for a turn is the single
+// strongest thing a card can do. Hand-only: never rolled into the pool (see
+// roomGenerator/combatEngine's drawFreshHand, the only two call sites that
+// pass it to generateWeightedDeck).
+export const QUAKE_CARD_RATIO = 0.03;
+
 // --- Status effects ---------------------------------------------------
 // Weaken/Strength/Poison are stack counts that decay by 1 per holder turn
 // (see engine/statusEffects.ts). Strength and Poison convert 1:1 into flat

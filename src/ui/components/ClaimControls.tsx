@@ -13,6 +13,10 @@ interface ClaimControlsProps {
   // one enemy, so the player picks who takes the hit by clicking the
   // enemy's card directly (see EnemyPanel), not a menu here.
   needsTarget: boolean;
+  // False once the turn's plays are used up and no unlimited-plays grant is
+  // active -- claiming is disabled regardless of what's selected, and the
+  // player must Pass to end the turn.
+  hasPlaysLeft: boolean;
   onClaim: () => void;
   onPass: () => void;
 }
@@ -26,6 +30,7 @@ export function ClaimControls({
   canClaim,
   hasAnyLegalClaim,
   needsTarget,
+  hasPlaysLeft,
   onClaim,
   onPass,
 }: ClaimControlsProps) {
@@ -34,7 +39,9 @@ export function ClaimControls({
       {!isPlayerTurn && <div className="claim-controls-note">Waiting on the room...</div>}
       {isPlayerTurn && (
         <>
-          {needsTarget ? (
+          {!hasPlaysLeft ? (
+            <div className="claim-controls-note">No plays left this turn -- pass to end it.</div>
+          ) : needsTarget ? (
             <div className="claim-controls-note">
               Click an enemy above to target with {selectedSuitName} ({poolSetSize} x {selectedCount} ={' '}
               {poolSetSize * selectedCount}).

@@ -1,5 +1,6 @@
 import type { SuitId } from '../types/suits';
 import type { Card } from '../types/cards';
+import { isCreatureCard } from '../types/cards';
 import type { Rng } from './rng';
 import { uniformPick } from './weightedPick';
 import { generateWeightedDeck } from './deckGenerator';
@@ -30,7 +31,7 @@ export function resolveAddCards(
 }
 
 export function resolveBlockSuit(pool: Card[], rng: Rng): SuitId | null {
-  const creatureSuits = Array.from(new Set(pool.map((c) => c.suit)));
+  const creatureSuits = Array.from(new Set(pool.filter(isCreatureCard).map((c) => c.suit)));
   if (creatureSuits.length === 0) return null;
   return uniformPick(rng, creatureSuits);
 }

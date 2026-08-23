@@ -93,9 +93,13 @@ export function CombatScreen() {
     : true;
 
   function handleCardClick(card: Card) {
-    if (!isPlayerTurn) return;
+    if (!canAct) return;
+    if (card.kind === 'quake') {
+      dispatchCombat({ type: 'PLAYER_PLAY_QUAKE', cardId: card.id });
+      return;
+    }
     if (selectedSuit !== card.suit) {
-      const matching = combat.playerHand.filter((c) => c.suit === card.suit);
+      const matching = combat.playerHand.filter((c) => c.kind === 'creature' && c.suit === card.suit);
       setSelectedSuit(card.suit);
       setSelectedIds(new Set(matching.map((c) => c.id)));
       const targets = getLegalPlayerClaimTargets(combat).filter((t) => t.suit === card.suit);
@@ -119,6 +123,13 @@ export function CombatScreen() {
       targetInstanceId: selectedTargetInstanceId ?? undefined,
       handCardIds: Array.from(selectedIds),
     });
+    // A claim doesn't always end the turn any more (see playsRemaining) --
+    // the turnNumber-change effect above only resets selection when the
+    // whole turn ends, so clear it here unconditionally instead of leaving
+    // stale ids/suit pointing at cards this claim just removed from hand.
+    setSelectedSuit(null);
+    setSelectedIds(new Set());
+    setSelectedTargetInstanceId(null);
   }
 
   function handlePass() {
@@ -133,8 +144,14 @@ export function CombatScreen() {
     ? (legalTargets.find((t) => t.suit === selectedSuit)?.poolSetSize ?? 0)
     : 0;
   const hasChosenTarget = suitNeedsNoTarget || selectedTargetInstanceId !== null;
+  const hasPlaysLeft = combat.unlimitedPlaysThisTurn || combat.playsRemaining > 0;
   const canClaim =
-    canAct && selectedSuit !== null && selectedIds.size > 0 && hasChosenTarget && poolSetSize >= MIN_POOL_SET_SIZE;
+    canAct &&
+    hasPlaysLeft &&
+    selectedSuit !== null &&
+    selectedIds.size > 0 &&
+    hasChosenTarget &&
+    poolSetSize >= MIN_POOL_SET_SIZE;
   const isSelectedSuitBlocked = selectedSuit !== null && (combat.blockedSuits[selectedSuit] ?? 0) > 0;
 
   return (
@@ -161,6 +178,13 @@ export function CombatScreen() {
         {combat.status === 'room-cleared' && 'Room cleared!'}
         {combat.status === 'active' &&
           `Turn ${combat.turnNumber} -- ${isPlaying ? 'Resolving...' : isPlayerTurn ? 'Your turn' : "Enemies' turn"}`}
+        {combat.status === 'active' && isPlayerTurn && !isPlaying && (
+          <span className="combat-plays-remaining">
+            {combat.unlimitedPlaysThisTurn
+              ? ' -- Unlimited plays!'
+              : ` -- ${combat.playsRemaining} play${combat.playsRemaining === 1 ? '' : 's'} left`}
+          </span>
+        )}
       </div>
 
       <BlockedSuitBanner blockedSuits={combat.blockedSuits} />
@@ -189,6 +213,7 @@ export function CombatScreen() {
               canClaim={canClaim}
               hasAnyLegalClaim={legalTargets.length > 0}
               needsTarget={needsTarget}
+              hasPlaysLeft={hasPlaysLeft}
               onClaim={handleClaim}
               onPass={handlePass}
             />

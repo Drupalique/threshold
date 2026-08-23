@@ -28,6 +28,7 @@ Full v0.1 scope from the design doc's Section 6, with the room-opponent model re
 - Placeholder door system: size + color + texture tags, each independently rolled against the real next room at a 75% correlation rate. Texture now correlates with "does this room contain a Corrupt-capable enemy" (previously: presence of a random pool-embedded surprise card, which no longer exists).
 - Linear 10-room run, win/loss end screens with a trailing log, restart.
 - 9 suits (4 threat: Wolf/Ember/Rot/Spider, 1 boon: Grace, 1 guard: Ward, 3 status: Hex/Venom/Vigor), data-driven in `src/config/constants.ts`.
+- **Plays per turn:** the player may make `PLAYS_PER_TURN_BASE` (2) separate claims in a single turn before it passes to the enemy phase, instead of exactly one -- see "Plays per turn" below. The Quake special card (kind `'quake'`, hand-only, ~3% draw rate) grants unlimited plays for the rest of the current turn when played.
 
 Architecture: pure, framework-free engine (`src/engine/`) driving a thin React reducer bridge (`src/state/RunContext.tsx`) and a component UI (`src/ui/`). See the file tree in-repo for the full module breakdown.
 
@@ -67,6 +68,14 @@ The player-facing mirror of the enemy's own Debuff/Poison/Strength intents, adde
 None of the three get the claim's own Strength/Weaken bonus (same rule as boon/guard -- see `performClaim`'s `isThreat` gate): inflicting a debuff isn't itself an "attack" the player's own buffs should scale. Each has its own pool/hand draw ratio (`WEAKEN_SUIT_RATIO`/`POISON_SUIT_RATIO`/`STRENGTH_SUIT_RATIO` = 0.08 each, mirroring `GUARD_SUIT_RATIO`'s "rarer than boon" weighting), and each decays symmetrically like every other suit: a Hex/Venom/Vigor pile left unclaimed for `DECAY_TURNS_N` turns grants its stacks to **everyone in the room** (player and every alive enemy alike) at magnitude = pile size, same "hits everyone, untargeted" rule threat/boon/guard decay already followed.
 
 First-cut ratios and suit-to-status mapping, not balance-tested -- see Open threads.
+
+## Plays per turn (`src/engine/combatEngine.ts`, `CombatState.playsRemaining`)
+
+Previously every `PLAYER_CLAIM` unconditionally ended the player's turn (one claim in, straight to the enemy phase). The player can now make `PLAYS_PER_TURN_BASE` (2) separate claims in the same turn -- the pool/hand/enemy state carries over between them, so a claim can set up the next one (e.g. clearing a blocking pile, or stacking Strength before a threat claim) -- before control actually passes to the enemies. `PLAYER_PASS` still always ends the turn immediately regardless of plays left, and running out of plays with no Quake card active does the same automatically.
+
+`playsRemaining` is reset to `PLAYS_PER_TURN_BASE` at the start of every fresh player turn (`CombatState`, set in `initCombat` and in `combatEngine.ts`'s end-of-enemy-phase branch) and is a deliberate hook point for future temporary buffs/debuffs or per-run relics that grant (or cost) plays -- none exist yet beyond the Quake card below.
+
+**Quake card** (`types/cards.ts`'s `QuakeCard`, `kind: 'quake'`): a suitless, hand-only special card (never rolled into the pool) drawn at `QUAKE_CARD_RATIO` (3%) per hand card. Played via its own `PLAYER_PLAY_QUAKE` action (not a claim -- no pool match, no target), it sets `unlimitedPlaysThisTurn`, which lifts the plays cap for the rest of the current turn; only `PLAYER_PASS` ends a Quake-boosted turn. It's a free action -- playing it doesn't itself spend a play.
 
 ## Deviations from the v0.2 design doc
 
@@ -115,6 +124,8 @@ MIN_POOL_SET_SIZE = 1               # deviation #2
 SURPRISE_ADD_CARDS_COUNT = 2
 SURPRISE_BLOCK_DURATION_TURNS = 1
 WEAKEN_PCT_PER_STACK = 0.1          # see "Status effects" above
+PLAYS_PER_TURN_BASE = 2             # see "Plays per turn" above
+QUAKE_CARD_RATIO = 0.03             # per hand card -- see "Plays per turn" above
 DOOR_CORRELATION_RATE = 0.75
 RUN_MAX_DEPTH = 10
 TURN_ANIMATION_DELAY_MS = 600       # UI pacing only, not engine
@@ -138,4 +149,5 @@ Full door glyph-field/tree encoding, convergent nodes, artifacts, meta-progressi
 - **The pool/enemy decoupling (design doc 4.8) is unplayed.** The target-picker now fires on nearly every multi-enemy threat claim instead of the rare same-suit-duplicate case -- confirm that's still a lightweight prompt and not friction, and whether "any pile, any target" reads as a clean tactical widening or removes texture from "this pile is this enemy's problem." Also unconfirmed: whether 1-vs-2 threat suits by size band is the right room-type lever, and whether pool suit variety should correlate with the specific enemies present at all (currently fully independent by design).
 - **The Weaken/Strength/Poison status framework, and the Hex/Venom/Vigor suits that let the player inflict/grant them, are unplayed.** Open questions: do the 0.08 draw ratios feel right relative to Guard's 0.08 and Grace's 0.12, does a decaying Hex/Venom pile weakening/poisoning *the player too* read as an interesting tension or just feel bad the first time it happens (same open question the boon/guard decay symmetry already raised), and is "no Strength/Weaken bonus applies to a status-suit claim" (the `isThreat` gate) the right call or should the player's own Strength boost how many Weaken/Poison stacks a Hex/Venom claim inflicts?
 - **Wolf-kin's Strength swap and Spider Broodmother's Poison swap are unbalanced first cuts**, not confirmed by playtesting -- see the roster table above.
+- **Plays per turn (2) and the Quake card's 3% draw rate are both unplayed first-cut numbers.** Two claims a turn roughly doubles the player's per-round output against enemy HP/attack numbers that were tuned around exactly one -- watch specifically whether multi-enemy rooms got easier than intended. The Quake card's ratio was picked purely by analogy to the other suit ratios (rarer than Guard's 0.08), not by feel; also open: whether "unlimited plays" should be capped by hand size in practice (it naturally is, since each claim still spends real hand cards) or whether a large hand plus Quake trivializes a room.
 - No known bugs at time of writing; last fixed issue during this pass was a blocked-suit countdown that was decrementing in the same `endTurn` call that had just set it via Corrupt, silently unblocking a suit the instant it was blocked (fixed by only ticking the countdown at the true end of the player's turn, not on every enemy sub-action).

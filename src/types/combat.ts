@@ -46,6 +46,15 @@ export interface CombatState {
   playerStatuses: StatusBag;
   turnNumber: number;
   activeTurn: CombatActor;
+  // How many more set-claims the player may make before this turn passes to
+  // the enemy phase. Reset to PLAYS_PER_TURN_BASE (the hook point for future
+  // temporary buffs/debuffs or relics that adjust it) whenever a fresh
+  // player turn begins; ignored while unlimitedPlaysThisTurn is set.
+  playsRemaining: number;
+  // Set for the rest of the current player turn by playing a Quake card
+  // (see types/cards.ts) -- claims stop consuming playsRemaining until the
+  // turn actually ends via Pass.
+  unlimitedPlaysThisTurn: boolean;
   // Keyed by suit -- pool sets are suit-level, not owned by any one enemy.
   decayCounters: Partial<Record<SuitId, number>>;
   blockedSuits: Partial<Record<SuitId, number>>;
@@ -68,8 +77,17 @@ export interface PlayerPassAction {
   type: 'PLAYER_PASS';
 }
 
+export interface PlayerPlayQuakeAction {
+  type: 'PLAYER_PLAY_QUAKE';
+  cardId: string;
+}
+
 export interface EnemyTurnAction {
   type: 'ENEMY_TURN';
 }
 
-export type CombatAction = PlayerClaimAction | PlayerPassAction | EnemyTurnAction;
+export type CombatAction =
+  | PlayerClaimAction
+  | PlayerPassAction
+  | PlayerPlayQuakeAction
+  | EnemyTurnAction;

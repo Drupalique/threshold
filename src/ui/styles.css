@@ -224,6 +224,11 @@ button {
   color: #2ecc71;
 }
 
+.combat-plays-remaining {
+  color: #f1c40f;
+  font-weight: 500;
+}
+
 .blocked-suit-banner {
   text-align: center;
   color: #f1c40f;
@@ -278,6 +283,12 @@ button {
 .card-chip--disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.card-chip--quake {
+  background: linear-gradient(135deg, #f1c40f, #8e44ad);
+  border: 2px dashed #fff;
+  color: #fff;
 }
 
 /* --- Pool --- */
