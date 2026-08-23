@@ -208,6 +208,9 @@ button {
 .enemy-intent-badge--corrupt {
   background: #444;
 }
+.enemy-intent-badge--feed {
+  background: #2d5a2d;
+}
 
 .combat-turn-indicator {
   text-align: center;
@@ -394,6 +397,12 @@ button {
 
 .claim-preview {
   margin-bottom: 0.5rem;
+}
+
+.feed-preview {
+  margin-bottom: 0.5rem;
+  color: #7fbf7f;
+  font-size: 0.9rem;
 }
 
 .claim-controls-buttons {

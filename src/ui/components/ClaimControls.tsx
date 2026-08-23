@@ -17,7 +17,12 @@ interface ClaimControlsProps {
   // active -- claiming is disabled regardless of what's selected, and the
   // player must Pass to end the turn.
   hasPlaysLeft: boolean;
+  // Legal whenever a suit is selected with 1+ hand cards and the suit isn't
+  // blocked -- feeding has no pool-size floor and no target, so it's often
+  // legal even when Claim isn't (e.g. needsTarget, or too small a pile).
+  canFeed: boolean;
   onClaim: () => void;
+  onFeed: () => void;
   onPass: () => void;
 }
 
@@ -31,7 +36,9 @@ export function ClaimControls({
   hasAnyLegalClaim,
   needsTarget,
   hasPlaysLeft,
+  canFeed,
   onClaim,
+  onFeed,
   onPass,
 }: ClaimControlsProps) {
   return (
@@ -62,9 +69,18 @@ export function ClaimControls({
               {hasAnyLegalClaim ? 'Select matching cards to claim a set.' : 'No legal claims available.'}
             </div>
           )}
+          {canFeed && (
+            <div className="feed-preview">
+              Or feed {selectedCount} {selectedSuitName} card(s) into the pool instead (now {poolSetSize} &rarr;{' '}
+              {poolSetSize + selectedCount}) -- banks a bigger future claim, but doesn't resolve anything now.
+            </div>
+          )}
           <div className="claim-controls-buttons">
             <button type="button" disabled={!canClaim} onClick={onClaim}>
               Claim
+            </button>
+            <button type="button" disabled={!canFeed} onClick={onFeed}>
+              Feed
             </button>
             <button type="button" onClick={onPass}>
               Pass

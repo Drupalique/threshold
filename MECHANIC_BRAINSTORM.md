@@ -8,6 +8,8 @@ and understand it without the surrounding chat.
 
 ## Feed the pool -- play cards into a pile instead of only claiming from it
 
+**Status: built, 2026-08-23 -- see `threshold-prototype-design.md` Section 4.11 for the system as shipped and `PROTOTYPE_STATUS.md` for current open threads.** The open questions below were resolved during implementation (costs a full play; can seed a pile from zero; feeds exactly the hand cards selected, no cap; a fed card behaves like any other pool card, not tracked back to `discardPile`; enemies got a basic `feed` intent too, demonstrated on Rot Husk). Kept here for the historical reasoning -- read 4.11 for what's actually running.
+
 **The idea:** today the only way a hand card interacts with the pool is
 claiming (consume a live set + matching hand cards, resolve an effect,
 remove the pile). There's no way to voluntarily *grow* a pile. This proposes

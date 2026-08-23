@@ -79,6 +79,17 @@ export interface PlayerClaimAction {
   handCardIds: string[];
 }
 
+// Play any number of matching-suit hand cards face-up onto the pool instead
+// of claiming -- grows (or, if the suit has zero live copies, seeds) that
+// suit's pile without resolving any effect, spending a play the same way a
+// claim does (MECHANIC_BRAINSTORM.md's "feed the pool" idea). No target:
+// unlike a claim, feeding never touches an enemy directly.
+export interface PlayerFeedAction {
+  type: 'PLAYER_FEED';
+  suit: SuitId;
+  handCardIds: string[];
+}
+
 export interface PlayerPassAction {
   type: 'PLAYER_PASS';
 }
@@ -94,6 +105,7 @@ export interface EnemyTurnAction {
 
 export type CombatAction =
   | PlayerClaimAction
+  | PlayerFeedAction
   | PlayerPassAction
   | PlayerPlayQuakeAction
   | EnemyTurnAction;

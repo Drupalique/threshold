@@ -1,6 +1,7 @@
 import type { StatusBag } from './status';
+import type { SuitId } from './suits';
 
-export type IntentType = 'attack' | 'guard' | 'heal' | 'debuff' | 'poison' | 'strength' | 'corrupt';
+export type IntentType = 'attack' | 'guard' | 'heal' | 'debuff' | 'poison' | 'strength' | 'corrupt' | 'feed';
 
 export type CorruptEffectType = 'add-cards' | 'block-suit' | 'force-discard';
 
@@ -8,11 +9,18 @@ export interface IntentStep {
   type: IntentType;
   // Damage (attack), Guard banked (guard), Room-HP restored (heal), Weaken
   // stacks applied to the player (debuff), Poison stacks applied to the
-  // player (poison), or Strength stacks the enemy grants itself (strength)
-  // -- see engine/statusEffects.ts for how stacks resolve into magnitude.
-  // Unused for corrupt -- see corruptEffect instead.
+  // player (poison), Strength stacks the enemy grants itself (strength), or
+  // cards added to the pool (feed) -- see engine/statusEffects.ts for how
+  // stacks resolve into magnitude. Unused for corrupt -- see corruptEffect
+  // instead.
   magnitude?: number;
   corruptEffect?: CorruptEffectType;
+  // feed only: which suit's pile grows by `magnitude` cards. Authored per
+  // pattern step, not chosen at random, matching every other intent's
+  // "deliberately memorizable" fixed-cycle design (MECHANIC_BRAINSTORM.md's
+  // "feed the pool" idea) -- an enemy always feeds the same pile at the same
+  // point in its cycle.
+  feedSuit?: SuitId;
 }
 
 /**

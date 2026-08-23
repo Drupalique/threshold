@@ -208,6 +208,24 @@ switch (cmd) {
     break;
   }
 
+  case 'feed': {
+    const [suit, cardIdsRaw] = args;
+    if (!suit || !cardIdsRaw) {
+      console.log('Usage: feed <suit> <cardId1,cardId2,...>');
+      process.exit(1);
+    }
+    const { run } = load();
+    let next = applyCombatAction(run, {
+      type: 'PLAYER_FEED',
+      suit: suit as SuitId,
+      handCardIds: cardIdsRaw.split(','),
+    });
+    next = runToNextDecision(next);
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
   case 'pass': {
     const { run } = load();
     let next = applyCombatAction(run, { type: 'PLAYER_PASS' });
@@ -274,6 +292,7 @@ Commands:
   new [seed]                              start a fresh run (default: random seed)
   state                                   reprint the current state
   claim <suit> <id,id,...> [targetId]     claim a pool set with these hand cards
+  feed <suit> <id,id,...>                 play matching hand cards face-up into the pool instead of claiming
   pass                                    end your turn without claiming
   quake <cardId>                          play a Quake card (unlimited claims this turn)
   reward <cardIndex>                      pick a reward card (0-2) after clearing a room, before the door choice

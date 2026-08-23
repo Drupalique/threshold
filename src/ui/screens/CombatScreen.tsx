@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRun } from '../../state/runContextObject';
 import type { Card } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { getLegalPlayerClaimTargets, requiresEnemyTarget } from '../../engine/combatEngine';
+import { getLegalPlayerClaimTargets, requiresEnemyTarget, isLegalFeed } from '../../engine/combatEngine';
 import {
   SUIT_DEFINITIONS,
   TURN_ANIMATION_DELAY_MS,
@@ -132,6 +132,18 @@ export function CombatScreen() {
     setSelectedTargetInstanceId(null);
   }
 
+  function handleFeed() {
+    if (!selectedSuit || selectedIds.size === 0) return;
+    dispatchCombat({
+      type: 'PLAYER_FEED',
+      suit: selectedSuit,
+      handCardIds: Array.from(selectedIds),
+    });
+    setSelectedSuit(null);
+    setSelectedIds(new Set());
+    setSelectedTargetInstanceId(null);
+  }
+
   function handlePass() {
     dispatchCombat({ type: 'PLAYER_PASS' });
   }
@@ -153,6 +165,8 @@ export function CombatScreen() {
     hasChosenTarget &&
     poolSetSize >= MIN_POOL_SET_SIZE;
   const isSelectedSuitBlocked = selectedSuit !== null && (combat.blockedSuits[selectedSuit] ?? 0) > 0;
+  const canFeed =
+    canAct && selectedSuit !== null && isLegalFeed(combat, selectedSuit, Array.from(selectedIds));
 
   return (
     <div className="combat-screen">
@@ -216,7 +230,9 @@ export function CombatScreen() {
               hasAnyLegalClaim={legalTargets.length > 0}
               needsTarget={needsTarget}
               hasPlaysLeft={hasPlaysLeft}
+              canFeed={canFeed}
               onClaim={handleClaim}
+              onFeed={handleFeed}
               onPass={handlePass}
             />
           )}

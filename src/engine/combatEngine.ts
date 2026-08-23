@@ -206,6 +206,62 @@ function isLegalClaim(
   return countPoolSetSize(state.pool, suit) >= MIN_POOL_SET_SIZE;
 }
 
+/**
+ * Legal whenever the player has a play left, holds 1+ matching hand cards
+ * of `suit`, and the suit isn't currently blocked. Unlike a claim, feeding
+ * has no pool-size floor and no target -- it's legal even when `suit` has
+ * zero live copies in the pool (seeding a brand-new pile from nothing is
+ * the intended, more powerful case, per the design brainstorm), and it
+ * never resolves an effect on any enemy.
+ */
+export function isLegalFeed(state: CombatState, suit: SuitId, handCardIds: string[]): boolean {
+  if (state.playsRemaining <= 0 && !state.unlimitedPlaysThisTurn) return false;
+  if (handCardIds.length === 0) return false;
+  const uniqueIds = new Set(handCardIds);
+  if (uniqueIds.size !== handCardIds.length) return false;
+  for (const id of uniqueIds) {
+    const card = state.playerHand.find((c) => c.id === id);
+    if (!card || card.kind !== 'creature' || card.suit !== suit) return false;
+  }
+  if ((state.blockedSuits[suit] ?? 0) > 0) return false;
+  return true;
+}
+
+/**
+ * Moves the chosen hand cards face-up into the pool as-is (a CreatureCard
+ * is shaped identically whether it's in a hand or the pool, so no
+ * conversion is needed). The fed cards become ordinary pool cards from this
+ * point on: if later claimed or left to decay, they vanish the same way any
+ * room-generated pool card does, rather than returning to discardPile --
+ * they're only recoverable via the persistent deck's next full-room
+ * reshuffle, not within this same room (MECHANIC_BRAINSTORM.md's "feed the
+ * pool" open question 4, resolved this way for consistency with how
+ * room-generated pool cards already behave).
+ */
+function performFeed(state: CombatState, suit: SuitId, handCardIds: string[]): CombatState {
+  const fedIdSet = new Set(handCardIds);
+  const fedCards = state.playerHand.filter((c) => fedIdSet.has(c.id));
+  const nextHand = state.playerHand.filter((c) => !fedIdSet.has(c.id));
+  const nextPool = [...state.pool, ...fedCards];
+  const newSize = countPoolSetSize(nextPool, suit);
+
+  return {
+    ...state,
+    pool: nextPool,
+    playerHand: nextHand,
+    log: [
+      ...state.log,
+      makeLog(
+        state.turnNumber,
+        'player',
+        'feed',
+        `Player feeds ${fedCards.length} card(s) into the ${suitName(suit)} pile (now ${newSize}), banking a bigger future claim.`,
+        snapshotOf(state),
+      ),
+    ],
+  };
+}
+
 function performClaim(
   state: CombatState,
   suit: SuitId,
@@ -364,6 +420,19 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
       next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, statuses: addStacks(e.statuses, 'strength', stacks) }));
       const totalStacks = stacksOf(next.enemies.find((e) => e.instanceId === enemy.instanceId)!.statuses, 'strength');
       message = `${enemy.name} hardens itself -- +${stacks} Strength (${totalStacks} stack${totalStacks === 1 ? '' : 's'}).`;
+      break;
+    }
+    case 'feed': {
+      const count = step.magnitude ?? 0;
+      const feedSuit = step.feedSuit!;
+      const added: Card[] = Array.from({ length: count }, (_, i) => ({
+        id: `feed-${enemy.instanceId}-t${next.turnNumber}-${i}`,
+        kind: 'creature' as const,
+        suit: feedSuit,
+      }));
+      const newSize = countPoolSetSize([...next.pool, ...added], feedSuit);
+      next = { ...next, pool: [...next.pool, ...added] };
+      message = `${enemy.name} feeds the ${suitName(feedSuit)} pile -- +${count} card(s) (now ${newSize}).`;
       break;
     }
     case 'corrupt': {
@@ -809,6 +878,20 @@ export function applyCombatAction(state: CombatState, action: CombatAction, rng:
     }
     const turnContinues = claimed.unlimitedPlaysThisTurn || claimed.playsRemaining > 0;
     return endTurn(claimed, rng, turnContinues);
+  }
+
+  if (action.type === 'PLAYER_FEED') {
+    if (state.activeTurn !== 'player') return state;
+    if (!isLegalFeed(state, action.suit, action.handCardIds)) return state;
+    let fed = performFeed(state, action.suit, action.handCardIds);
+    // Feeding spends a play exactly like a claim does -- it's the other
+    // thing you can do with a play instead of claiming, not a free extra
+    // action.
+    if (!fed.unlimitedPlaysThisTurn) {
+      fed = { ...fed, playsRemaining: fed.playsRemaining - 1 };
+    }
+    const turnContinues = fed.unlimitedPlaysThisTurn || fed.playsRemaining > 0;
+    return endTurn(fed, rng, turnContinues);
   }
 
   if (action.type === 'PLAYER_PLAY_QUAKE') {

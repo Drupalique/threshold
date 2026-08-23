@@ -46,10 +46,17 @@ export const ENEMY_DEFS: EnemyDef[] = [
     minFloor: 2,
     // 3 Weaken stacks x WEAKEN_PCT_PER_STACK (0.1) = 30%, same reduction the
     // old flat-fraction debuff dealt -- converted to stacks, not rebalanced.
+    // First demonstration enemy for the "feed" intent (MECHANIC_BRAINSTORM.md):
+    // a patient, control-flavored enemy fattening the Ward pile it doesn't
+    // own and can't itself claim, banking on the pile decaying later to
+    // shield itself (and any packmate) for free -- reusing Finding 4's
+    // decay-benefits-more-bodies asymmetry as deliberate enemy behavior
+    // rather than a passive stat quirk.
     pattern: [
       { type: 'debuff', magnitude: 3 },
       { type: 'attack', magnitude: 4 },
       { type: 'heal', magnitude: 4 },
+      { type: 'feed', feedSuit: 'ward', magnitude: 2 },
     ],
   },
   {

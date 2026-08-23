@@ -458,6 +458,112 @@ describe('enemy turn resolution (fixed pattern cycle)', () => {
     expect(next.discardPile.some((c) => c.id === 'ph1')).toBe(true);
     expect(next.activeTurn).toBe('enemy'); // round not over -- e2 still to act
   });
+
+  it('feed adds cards of the authored suit to the pool, resolving no effect', () => {
+    const room = makeRoom({
+      enemies: [makeEnemy({ defId: 'rot-husk', name: 'Rot Husk', hp: 18, hpMax: 18, patternIndex: 3 })], // rot-husk[3] = feed ward +2
+      pool: [],
+    });
+    const rng = createRng(10);
+    let state: CombatState = makeCombat(room, rng, 30, 30);
+    state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
+
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+    const wardCards = next.pool.filter((c) => isCreatureCard(c) && c.suit === 'ward');
+    expect(wardCards.length).toBe(2);
+    expect(next.playerHP).toBe(30); // no effect resolves, just pool growth
+    expect(next.enemies[0].hp).toBe(18);
+  });
+});
+
+describe('feed the pool (PLAYER_FEED)', () => {
+  it('seeds a brand-new pile from zero and removes the fed cards from hand', () => {
+    const room = makeRoom({ pool: [] }); // no rot cards on the table at all
+    const rng = createRng(11);
+    const state = makeCombat(room, rng, 30, 30, [
+      { id: 'ph1', kind: 'creature', suit: 'rot' },
+      { id: 'ph2', kind: 'creature', suit: 'rot' },
+    ]);
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAYER_FEED', suit: 'rot', handCardIds: ['ph1', 'ph2'] },
+      rng,
+    );
+
+    const rotCards = next.pool.filter((c) => isCreatureCard(c) && c.suit === 'rot');
+    expect(rotCards.length).toBe(2);
+    expect(next.playerHand.some((c) => c.id === 'ph1' || c.id === 'ph2')).toBe(false);
+    expect(next.playerHP).toBe(30); // feeding resolves no effect
+  });
+
+  it('grows an already-live pile without resolving any effect on the enemy', () => {
+    const room = makeRoom(); // 4 wolf cards already in the pool
+    const rng = createRng(12);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'wolf' }]);
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAYER_FEED', suit: 'wolf', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    const wolfCards = next.pool.filter((c) => isCreatureCard(c) && c.suit === 'wolf');
+    expect(wolfCards.length).toBe(5);
+    expect(next.enemies[0].hp).toBe(20); // untouched -- feeding never targets an enemy
+  });
+
+  it('spends a play like a claim does', () => {
+    const room = makeRoom({ pool: [] });
+    const rng = createRng(13);
+    const state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'rot' }]);
+    expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE);
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAYER_FEED', suit: 'rot', handCardIds: ['ph1'] },
+      rng,
+    );
+    expect(next.playsRemaining).toBe(PLAYS_PER_TURN_BASE - 1);
+    expect(next.activeTurn).toBe('player'); // one play left -- turn continues
+  });
+
+  it('is illegal when the suit is blocked, and a no-op action leaves state unchanged', () => {
+    const room = makeRoom({ pool: [] });
+    const rng = createRng(14);
+    let state = makeCombat(room, rng, 30, 30, [{ id: 'ph1', kind: 'creature', suit: 'rot' }]);
+    state = { ...state, blockedSuits: { rot: 1 } };
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAYER_FEED', suit: 'rot', handCardIds: ['ph1'] },
+      rng,
+    );
+    expect(next).toBe(state); // rejected outright, same reference back
+  });
+
+  it('fed cards vanish like any other pool card if the pile is later claimed -- they do not return to discardPile', () => {
+    const room = makeRoom({ pool: [] });
+    const rng = createRng(15);
+    let state = makeCombat(room, rng, 30, 30, [
+      { id: 'ph1', kind: 'creature', suit: 'rot' },
+      { id: 'ph2', kind: 'creature', suit: 'rot' },
+    ]);
+    state = applyCombatAction(state, { type: 'PLAYER_FEED', suit: 'rot', handCardIds: ['ph1'] }, rng);
+    expect(state.pool.some((c) => isCreatureCard(c) && c.suit === 'rot')).toBe(true);
+
+    state = { ...state, playerHand: [{ id: 'ph3', kind: 'creature', suit: 'rot' }] };
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAYER_CLAIM', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph3'] },
+      rng,
+    );
+    expect(next.pool.some((c) => isCreatureCard(c) && c.suit === 'rot')).toBe(false);
+    // ph1 was fed, not claimed -- it must not show up in discardPile.
+    expect(next.discardPile.some((c) => c.id === 'ph1')).toBe(false);
+    // ph3, the actually-claimed hand card, does go to discardPile as usual.
+    expect(next.discardPile.some((c) => c.id === 'ph3')).toBe(true);
+  });
 });
 
 describe('status effects: Weaken/Strength/Poison are stacks that decay by 1 per holder turn', () => {

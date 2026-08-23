@@ -2,6 +2,7 @@ import type { EnemyInstance } from '../../types/enemy';
 import type { IntentType, CorruptEffectType } from '../../types/enemy';
 import type { StatusId } from '../../types/status';
 import { STATUS_DEFS } from '../../types/status';
+import { SUIT_DEFINITIONS } from '../../config/constants';
 import { currentIntent } from '../../engine/roomIntent';
 import { MeterBar } from './MeterBar';
 
@@ -13,6 +14,7 @@ const INTENT_LABEL: Record<IntentType, string> = {
   poison: 'Poison',
   strength: 'Strength',
   corrupt: 'Corrupt',
+  feed: 'Feed',
 };
 
 const INTENT_ICON: Record<IntentType, string> = {
@@ -23,6 +25,7 @@ const INTENT_ICON: Record<IntentType, string> = {
   poison: '\u{2623}',
   strength: '\u{1F4AA}',
   corrupt: '\u{1F300}',
+  feed: '\u{1F331}',
 };
 
 const STATUS_ICON: Record<StatusId, string> = {
@@ -50,6 +53,10 @@ function intentText(instance: EnemyInstance): string {
       return `${label} ${step.magnitude ?? 0}`;
     case 'corrupt':
       return `${label}: ${step.corruptEffect ? CORRUPT_LABEL[step.corruptEffect] : ''}`;
+    case 'feed': {
+      const suitLabel = step.feedSuit ? SUIT_DEFINITIONS.find((s) => s.id === step.feedSuit)!.name : '';
+      return `${label} ${suitLabel} +${step.magnitude ?? 0}`;
+    }
   }
 }
 
