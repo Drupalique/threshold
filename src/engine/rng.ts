@@ -2,12 +2,15 @@ export interface Rng {
   next(): number; // float in [0, 1)
   int(min: number, max: number): number; // inclusive both ends
   pickIndex(weights: number[]): number;
+  // Exposes the internal 32-bit generator state so callers that can't stay
+  // resident in one process (e.g. a CLI driven one command per invocation --
+  // see scripts/playtest.ts) can persist and resume a run's exact random
+  // sequence across process boundaries via createRngFromState.
+  getState(): number;
 }
 
 // mulberry32 -- small, fast, deterministic PRNG so runs are reproducible from a seed.
-export function createRng(seed: number): Rng {
-  let state = seed >>> 0;
-
+function fromState(state: number): Rng {
   function next(): number {
     state |= 0;
     state = (state + 0x6d2b79f5) | 0;
@@ -31,5 +34,13 @@ export function createRng(seed: number): Rng {
     return weights.length - 1;
   }
 
-  return { next, int, pickIndex };
+  return { next, int, pickIndex, getState: () => state };
+}
+
+export function createRng(seed: number): Rng {
+  return fromState(seed >>> 0);
+}
+
+export function createRngFromState(state: number): Rng {
+  return fromState(state);
 }
