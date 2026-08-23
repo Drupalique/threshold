@@ -86,6 +86,18 @@ export const THREAT_SUIT_COUNT_BY_SIZE_BAND: Record<PoolSizeBand, number> = {
 export const ROOM_MIN_ENEMIES = 1;
 export const ROOM_MAX_ENEMIES = 3;
 
+// Enemy count is the single largest lever on room lethality
+// (PLAYTEST_FINDINGS.md Finding 1: 1-enemy rooms cleared at 91% vs. 10% for
+// 3-enemy, identical across every bot profile tested) and used to be rolled
+// uniformly across ROOM_MIN_ENEMIES..ROOM_MAX_ENEMIES regardless of floor --
+// a 3-pack was exactly as likely on room 1 as room 9. These are the two
+// interpolation endpoints roomGenerator's pickEnemyCount blends between
+// across floor 1..RUN_MAX_DEPTH: index 0 = weight for ROOM_MIN_ENEMIES, last
+// index = weight for ROOM_MAX_ENEMIES. Must stay the same length as the
+// count range (ROOM_MAX_ENEMIES - ROOM_MIN_ENEMIES + 1).
+export const ENEMY_COUNT_WEIGHTS_EARLY: number[] = [6, 2, 0]; // floor 1: mostly solo, no 3-packs
+export const ENEMY_COUNT_WEIGHTS_LATE: number[] = [1, 3, 5]; // floor RUN_MAX_DEPTH: 3-packs common
+
 // --- Deck weighting -------------------------------------------------------
 // ON_SUIT_RATIO is THE single most important tuning knob in the whole system
 // (design doc 4.3): it directly controls how often the multiplicative claim

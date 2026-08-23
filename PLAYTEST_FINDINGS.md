@@ -414,3 +414,56 @@ would fix it" gap.
 - **Cost was trivial** at Haiku 4.5 pricing (order of $0.30 across all
   three validation runs combined, by rough estimate -- exact token usage
   isn't logged yet).
+
+## Addendum, 2026-08-23 -- depth-scaled enemy count + staggered duplicate patterns (Priorities 1-2)
+
+Implemented the top two items from this document's "suggested next
+experiments": `roomGenerator.ts`'s `pickEnemyCount` now weights the 1/2/3
+enemy roll by floor instead of rolling uniformly everywhere (blending
+`ENEMY_COUNT_WEIGHTS_EARLY` -> `ENEMY_COUNT_WEIGHTS_LATE` across floor
+1..`RUN_MAX_DEPTH`, `constants.ts`), and same-defId duplicate enemies now
+start at staggered `patternIndex` offsets (0, 1, 2... mod that def's
+pattern length) instead of all starting at 0, directly targeting Finding 3's
+lockstep. Re-ran the same `playtest-sim.ts` harness (n=500, seeds 1-500,
+both profiles) on top of the persistent-deck build these findings already
+reflect -- Finding 7's suit-diversity issue is **not** addressed by this
+change and is still live underneath these numbers.
+
+| | Aggro (before &rarr; after) | Defensive (before &rarr; after) |
+|---|---|---|
+| Avg depth reached (of 10) | 0.66 &rarr; **1.44** | 0.66 &rarr; **1.48** |
+| Dead-hand turn rate | 52.3% &rarr; 53.2% | 52.7% &rarr; ~53% |
+
+Both profiles agree closely with each other post-change (1.44 vs. 1.48),
+the same cross-check the original Finding 1 relied on to rule out bot skill
+as the explanation. Average depth more than doubled, and now exceeds even
+the original pre-persistent-deck baseline (1.24) -- despite Finding 7's
+under-supply problem still being fully present. Room clear rate by enemy
+count (aggro), for reference against Finding 1's original table:
+
+| Enemies in room | Original (flat 1-3) | After (floor-scaled, aggro) |
+|---|---|---|
+| 1 | 91.4% | 76.1% (n=849) |
+| 2 | 60.6% | 25.2% (n=302) |
+| 3 | 10.4% | 0% (n=71) |
+
+These per-band numbers aren't directly comparable to the original table --
+the whole point of the change is that a given band's rooms are no longer
+drawn uniformly across all floors. 1-enemy rooms now include ones the
+player reaches only after surviving several earlier rooms (worn down, less
+HP), and the 71 3-enemy rooms seen are concentrated on deep floors by
+design, which is why 3-enemy clear rate reads as 0% here rather than an
+improvement -- the dataset's *floor distribution* changed, not just the
+band's difficulty. The metric that actually matters -- overall run
+survival -- more than doubled, which is the change's actual goal.
+
+Dead-hand rate is essentially unchanged (Finding 2/7 remains unaddressed,
+as expected -- neither change touches hand/pool supply). Lockstep check:
+100% of same-defId multi-enemy comparisons now show *divergent*
+`patternIndex` (was 0% divergence, i.e. 100% synced, before this change) --
+confirms the stagger is taking effect as intended.
+
+**Next up per the original priority list:** Priority 3 (retune
+`STARTER_DECK` toward fewer, deeper suits) to address Finding 7, which is
+still fully live in this dataset and is likely suppressing how much further
+depth could improve from here.

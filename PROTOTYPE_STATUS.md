@@ -25,6 +25,7 @@ Full v0.1 scope from the design doc's Section 6, with the room-opponent model re
 - **Pool piles and enemies are decoupled (design doc 4.8):** enemies carry no suit at all. A room's pool draws from `RoomParams.threatSuits`, chosen independently of which enemies are present (currently keyed off the room's size band -- 1 threat suit for a small room, 2 for a large one). A threat claim can be aimed at **any** alive enemy regardless of suit (prompted in the UI whenever 2+ enemies are alive, not just when duplicates share a suit). A room clears when every enemy's HP has independently reached 0.
 - **Decay redesign:** a pile left unclaimed for `DECAY_TURNS_N` turns no longer applies a flat Player HP penalty. It resolves its own suit's effect at magnitude equal to just its own pile size (no hand-card multiplier), landing on **every entity in the room** -- the player and every alive enemy alike. A decaying threat pile hurts everyone; a decaying boon pile heals everyone, enemies included; a decaying guard pile shields everyone. This is what makes claiming meaningfully better than waiting: only a claim lets you pick a target and multiply the effect.
 - Floor-gated enemy eligibility (`EnemyDef.minFloor`) -- the "harder enemies appear as floors increase" knob, selection currently uniform among eligible defs (see Open threads).
+- **Floor-scaled enemy count + staggered duplicate patterns** (response to `PLAYTEST_FINDINGS.md` Findings 1 and 3): `roomGenerator.ts`'s `pickEnemyCount` now weights the 1/2/3-enemy roll by floor (`ENEMY_COUNT_WEIGHTS_EARLY`/`ENEMY_COUNT_WEIGHTS_LATE` in `constants.ts`, linearly blended across floor 1..`RUN_MAX_DEPTH`) instead of a flat uniform roll everywhere, and same-defId duplicate enemies now start at staggered `patternIndex` offsets instead of all starting at 0, so a same-type pack no longer telegraphs and resolves in perfect lockstep. See the 2026-08-23 addendum in `PLAYTEST_FINDINGS.md` for re-run results (avg depth reached roughly doubled).
 - Placeholder door system: size + color + texture tags, each independently rolled against the real next room at a 75% correlation rate. Texture now correlates with "does this room contain a Corrupt-capable enemy" (previously: presence of a random pool-embedded surprise card, which no longer exists).
 - Linear 10-room run, win/loss end screens with a trailing log, restart.
 - 9 suits (4 threat: Wolf/Ember/Rot/Spider, 1 boon: Grace, 1 guard: Ward, 3 status: Hex/Venom/Vigor), data-driven in `src/config/constants.ts`.
@@ -111,6 +112,8 @@ ROOM_POOL_SIZE_SMALL = [6, 8]
 ROOM_POOL_SIZE_LARGE = [12, 16]
 ROOM_MIN_ENEMIES = 1
 ROOM_MAX_ENEMIES = 3
+ENEMY_COUNT_WEIGHTS_EARLY = [6, 2, 0]   # floor 1 enemy-count weights, see "What's implemented"
+ENEMY_COUNT_WEIGHTS_LATE = [1, 3, 5]    # floor RUN_MAX_DEPTH enemy-count weights
 THREAT_SUIT_COUNT_BY_SIZE_BAND = { small: 1, large: 2 }  # design doc 4.8 -- room-type knob for pool variety
 ON_SUIT_RATIO = 0.45                # deviation #4 -- single most important balance knob
 BOON_SUIT_RATIO = 0.12
