@@ -467,3 +467,82 @@ confirms the stagger is taking effect as intended.
 `STARTER_DECK` toward fewer, deeper suits) to address Finding 7, which is
 still fully live in this dataset and is likely suppressing how much further
 depth could improve from here.
+
+## Addendum, 2026-08-23 -- "feed the pool" exercised via the LLM bot, n=10, first look
+
+`playtest-sim.ts`'s heuristic bot has no feed heuristic and wasn't given
+one -- `pickBestClaim` is unchanged, so it never feeds. To actually exercise
+the new mechanic (design doc 4.11), `llmBot.ts` and `playtest-sim.ts` were
+extended so `PLAYTEST_BOT=llm` offers feed options alongside claim options
+in the same indexed choice list. Ran `PLAYTEST_BOT=llm npx tsx
+scripts/playtest-sim.ts 10 1` (Haiku 4.5, seeds 1-10) on top of the current
+build (Priorities 1-2's depth-scaled enemy count + staggered patterns
+already landed). **Treat this as a first directional look, not a verdict**
+-- n=10 is far below the n=500 heuristic baselines elsewhere in this
+document, single model, single prompt, one seed range. 0 fallback-to-pass
+events across all 277 LLM calls -- the harness held up.
+
+### Headline: dead-hand turns nearly vanish, but decay becomes the second-most-common killer
+
+| | Before feed (heuristic, n=500, this doc's earlier addendum) | With feed (LLM, n=10) |
+|---|---|---|
+| Dead-hand turn rate | ~52-53% | **4.7%** (7/149) |
+| Death causes | attack (dominant), decay ~7-8% of deaths | attack 6, **decay 4 (40% of deaths)** |
+| Avg depth reached | 1.44 (aggro, same build) | 1.1 (n=10, high variance) |
+
+The dead-hand collapse is exactly what feeding was built for (Findings 2/7):
+of 270 total claim-or-feed decisions across the 10 runs, 119 (44%) were
+feeds -- the model reached for feed constantly, not as a rare fallback, and
+turns with literally nothing legal to do dropped from roughly half of all
+turns to under 5%.
+
+**But decay's share of deaths jumped roughly 5x**, and the mechanism is
+directly traceable to feed's own documented risk (`MECHANIC_BRAINSTORM.md`'s
+"built-in risk" section, design doc 4.11): feeding does not pause or reset
+`decayCounters`, so a pile the model fed up over several turns and then
+didn't return to claim decays at its full grown size -- unmultiplied, but
+now hitting a bigger number than a same-suit pile would have reached
+without feeding, and (per Finding 4) hitting every alive enemy too, not just
+the player. The reasoning log shows the model treating "feed toward a
+bigger future claim" as close to a default action whenever nothing looks
+immediately great, including several times at single-digit HP ("Feed Ward
+to build guard pool for survival -- with only 2 HP remaining..." -- which
+does nothing to protect *this* turn) -- it doesn't yet weigh the decay clock
+against how many turns are actually left before `DECAY_TURNS_N` (3) expires
+that specific pile.
+
+### What this suggests
+
+1. **Feed working as an escape valve for dead hands is confirmed, at least
+   directionally** -- the 52% -> 4.7% swing is large enough to survive this
+   small a sample even as a rough signal, and it's the exact number the
+   mechanic was built to move.
+2. **The decay-death jump reads as a real tuning gap, not a fluke of one
+   model's prompt.** The mechanism (grown-then-abandoned piles decaying
+   bigger) is structural, not a haiku-specific mistake -- any decision-maker
+   that feeds opportunistically without tracking each pile's own decay
+   countdown will hit this. Worth a follow-up run instrumenting *which*
+   piles decay after being fed vs. never fed, to size the effect precisely
+   rather than inferring it from the death-cause split alone.
+3. **Candidate mitigations, not yet tried:** prompt the bot (and eventually
+   a human-facing UI cue) with each live pile's remaining decay countdown
+   specifically when a feed option is offered, so "should I feed or
+   reclaim this turn" has the countdown in view the way a human playing off
+   the UI's own "decays in N" tag already would; or reconsider whether
+   feeding should reset/pause that pile's own decay counter (a real design
+   option the brainstorm doc's open questions didn't rule out, just didn't
+   pick).
+4. **Re-run at n=25-50 once any mitigation lands**, matching the scale the
+   original LLM cross-check used, before treating either number above as
+   settled.
+
+### Caveats
+
+- n=10, one model (Haiku 4.5), one prompt, seeds 1-10 only -- this is a
+  smoke test with real signal in it, not a statistically powered result.
+- The heuristic bot still can't feed at all, so none of the large n=500
+  baselines elsewhere in this document include feed's effect on any metric
+  -- every heuristic number in this file predates the mechanic.
+- Avg depth reached (1.1) looks lower than the same-build heuristic baseline
+  (1.44) but n=10 vs n=500 makes that comparison unreliable on its own;
+  don't read a regression into it without a larger sample.
