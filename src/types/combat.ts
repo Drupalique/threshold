@@ -5,8 +5,26 @@ import type { RoomParams } from './room';
 import type { StatusBag } from './status';
 
 export type CombatActor = 'player' | 'enemy';
-
 export type CombatStatus = 'active' | 'room-cleared' | 'player-dead';
+
+// 'room' | 'player' | an EnemyInstance.instanceId -- who played a given
+// table card. Determines whose own-turn-start wipe removes it (see
+// combatEngine's wipeOwnerTable); nothing else ever removes a table card.
+export type TableOwnerId = 'room' | 'player' | string;
+
+/**
+ * One suited card sitting on the shared table, tagged with who played it.
+ * Replaces the old shared `pool: Card[]` entirely -- a play never removes
+ * anything from the table any more (see combatEngine's performPlay), so the
+ * table only ever grows within a round and only ever shrinks via an owner's
+ * own-turn-start wipe. Quake cards never appear here -- same as the old
+ * pool, only creature-suited cards land on the table.
+ */
+export interface TableCard {
+  id: string;
+  suit: SuitId;
+  ownerId: TableOwnerId;
+}
 
 export interface LogEntry {
   id: string;
@@ -14,80 +32,51 @@ export interface LogEntry {
   actor: CombatActor | 'system';
   type: string;
   message: string;
-  // Snapshot of the player's meters immediately after this entry's effects
-  // were applied, so the log reads as a status trail. Enemy HP is not
-  // snapshotted per-entry -- the enemy panel reads live state instead (see
-  // PROTOTYPE_STATUS.md: enemy HP updates instantly rather than drip-
-  // animating like the player HP bar does).
   playerHP: number;
   playerHPMax: number;
   playerGuard: number;
 }
 
 export interface CombatState {
-  pool: Card[];
+  table: TableCard[];
   playerHand: Card[];
-  // The player's persistent deck (RunState.deck), shuffled and split into
-  // these two piles for this room's combat only -- see engine/deckState.ts.
-  // Claimed/unclaimed/force-discarded cards all route to discardPile, never
-  // vanish; drawPile reshuffles from discardPile when it runs dry.
   drawPile: Card[];
   discardPile: Card[];
   roomParams: RoomParams;
-  // Alive enemies only, in stable turn order. A defeated enemy is removed
-  // immediately (see combatEngine's performClaim), never left at 0 HP.
   enemies: EnemyInstance[];
-  // Which enemies[] index acts next during an 'enemy' phase. Reset to 0
-  // whenever the phase ends and control returns to the player.
   activeEnemyIndex: number;
   playerHP: number;
   playerHPMax: number;
-  // Absorbs incoming Player HP loss until the current enemy phase finishes
-  // (see endTurn's guard-fade handling) -- the player's exclusive
-  // defensive tool, banked via the Ward suit.
+  // Persists like HP/statuses until it actually absorbs damage -- no more
+  // forced reset at enemy-phase-end (that was decay-rhythm-driven reasoning
+  // that no longer applies once decay itself is gone).
   playerGuard: number;
-  // Weaken/Strength/Poison stacks the player currently holds (see
-  // engine/statusEffects.ts) -- decays by 1 stack at the end of every
-  // player turn, whether or not a given stack was used.
   playerStatuses: StatusBag;
   turnNumber: number;
   activeTurn: CombatActor;
-  // How many more set-claims the player may make before this turn passes to
-  // the enemy phase. Reset to PLAYS_PER_TURN_BASE (the hook point for future
-  // temporary buffs/debuffs or relics that adjust it) whenever a fresh
-  // player turn begins; ignored while unlimitedPlaysThisTurn is set.
   playsRemaining: number;
-  // Set for the rest of the current player turn by playing a Quake card
-  // (see types/cards.ts) -- claims stop consuming playsRemaining until the
-  // turn actually ends via Pass.
   unlimitedPlaysThisTurn: boolean;
-  // Keyed by suit -- pool sets are suit-level, not owned by any one enemy.
-  decayCounters: Partial<Record<SuitId, number>>;
-  blockedSuits: Partial<Record<SuitId, number>>;
   log: LogEntry[];
   status: CombatStatus;
 }
 
-export interface PlayerClaimAction {
-  type: 'PLAYER_CLAIM';
+/**
+ * The one and only "do something with cards" action -- for both the player
+ * (dispatched from the UI) and, internally, every enemy (never
+ * UI-dispatched; chosen by engine/enemyAI.ts and applied the same way).
+ * Replaces the old separate claim/feed actions: a play that currently
+ * multiplies against zero matching table cards is legal and simply banks
+ * those cards for a future compounding play, which is exactly what "feed"
+ * used to do -- there's no longer a separate no-effect action for it.
+ */
+export interface PlaySetAction {
+  type: 'PLAY_SET';
   suit: SuitId;
-  // Which alive enemy to direct a threat claim's damage at, chosen freely by
-  // the player -- threat-suit pool cards aren't owned by any one enemy, so
-  // any enemy is a legal target regardless of suit. Required for threat
-  // suits; omit for boon/guard suits, which have no target at all.
+  handCardIds: string[];
+  // Required when the suit's category is threat/weaken/poison (see
+  // requiresEnemyTarget); omitted for boon/guard/strength, which always
+  // self-target the acting entity.
   targetInstanceId?: string;
-  handCardIds: string[];
-}
-
-// Play any number of matching-suit hand cards face-up onto the pool instead
-// of claiming -- grows (or, if the suit has zero live copies, seeds) that
-// suit's pile without resolving any effect, spending a play the same way a
-// claim does (MECHANIC_BRAINSTORM.md's "feed the pool" idea). No target:
-// unlike a claim, feeding never touches an enemy directly.
-export interface PlayerFeedAction {
-  type: 'PLAYER_FEED';
-  suit: SuitId;
-  handCardIds: string[];
 }
 
 export interface PlayerPassAction {
@@ -104,8 +93,7 @@ export interface EnemyTurnAction {
 }
 
 export type CombatAction =
-  | PlayerClaimAction
-  | PlayerFeedAction
+  | PlaySetAction
   | PlayerPassAction
   | PlayerPlayQuakeAction
   | EnemyTurnAction;

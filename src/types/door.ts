@@ -2,12 +2,10 @@ import type { RoomInstance } from './room';
 import type { PoolSizeBand } from './room';
 
 export type DoorColor = 'red' | 'blue';
-export type DoorTexture = 'smooth' | 'jagged';
 
 export interface DoorTags {
   size: PoolSizeBand;
   color: DoorColor;
-  texture: DoorTexture;
 }
 
 /**

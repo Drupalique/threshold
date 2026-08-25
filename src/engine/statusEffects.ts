@@ -20,10 +20,9 @@ export function addStacks(bag: StatusBag, id: StatusId, amount: number): StatusB
 /**
  * Runs once at the true end of a holder's own turn (the player's turn, or a
  * single enemy's dispatched action) -- never per sub-action, matching the
- * existing decayCounters/blockedSuits phase-boundary discipline (see
- * combatEngine's endTurn docstring: a status tallied twice in one action
- * would silently expire early, the same bug class as the historical
- * blocked-suit fix). Poison deals its current stack count as damage the
+ * existing per-actor-turn bookkeeping discipline (see combatEngine's
+ * endTurn docstring: a status tallied twice in one action would silently
+ * expire early). Poison deals its current stack count as damage the
  * instant before it decays; Weaken and Strength have no on-tick effect and
  * simply lose a stack. Every status here decays by exactly 1 stack per
  * holder turn; a stack that reaches 0 is dropped from the bag entirely.

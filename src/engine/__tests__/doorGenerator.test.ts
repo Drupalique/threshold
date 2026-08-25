@@ -13,7 +13,7 @@ describe('door generation', () => {
       const match = branchRoots.find((b) => b.id === door.branchRootId);
       expect(match).toBeDefined();
       expect(match!.depth).toBe(1);
-      expect(match!.room.pool.length).toBeGreaterThan(0);
+      expect(match!.room.params.tableDealSize).toBeGreaterThan(0);
     }
   });
 

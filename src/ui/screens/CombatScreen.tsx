@@ -2,20 +2,15 @@ import { useEffect, useState } from 'react';
 import { useRun } from '../../state/runContextObject';
 import type { Card } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { getLegalPlayerClaimTargets, requiresEnemyTarget, isLegalFeed } from '../../engine/combatEngine';
-import {
-  SUIT_DEFINITIONS,
-  TURN_ANIMATION_DELAY_MS,
-  MIN_POOL_SET_SIZE,
-} from '../../config/constants';
+import { getLegalPlaySets, requiresEnemyTarget } from '../../engine/combatEngine';
+import { SUIT_DEFINITIONS, TURN_ANIMATION_DELAY_MS } from '../../config/constants';
 import { useLogPlayback } from '../hooks/useLogPlayback';
 import { MeterBar } from '../components/MeterBar';
-import { PoolDisplay } from '../components/PoolDisplay';
+import { TableDisplay } from '../components/TableDisplay';
 import { HandDisplay } from '../components/HandDisplay';
 import { EnemyPanel, StatusBadges } from '../components/EnemyPanel';
-import { ClaimControls } from '../components/ClaimControls';
+import { PlayControls } from '../components/PlayControls';
 import { TurnLogFeed } from '../components/TurnLogFeed';
-import { BlockedSuitBanner } from '../components/BlockedSuitBanner';
 
 export function CombatScreen() {
   const { state, dispatchCombat, resolveCombatEnd } = useRun();
@@ -37,16 +32,16 @@ export function CombatScreen() {
   }
 
   // A single dispatched action can drop several log entries at once (e.g. an
-  // attack followed by an unrelated suit's decay penalty in the same
-  // turn-end tick) -- this drips them out one at a time instead of jumping
-  // straight to the net result, so the sequence stays legible.
+  // attack followed by an unrelated status tick in the same turn-end tick)
+  // -- this drips them out one at a time instead of jumping straight to the
+  // net result, so the sequence stays legible.
   const { visibleLog, displayedPlayerHP, displayedPlayerHPMax, displayedPlayerGuard, isPlaying } = useLogPlayback(
     combat.log,
   );
 
   const isPlayerTurn = combat.activeTurn === 'player' && combat.status === 'active';
   // "Your turn to act" also waits for the previous turn's log queue to
-  // finish draining -- otherwise the player could claim again while an
+  // finish draining -- otherwise the player could play again while an
   // enemy's just-resolved action is still playing out.
   const canAct = isPlayerTurn && !isPlaying;
 
@@ -76,10 +71,10 @@ export function CombatScreen() {
     return () => clearTimeout(timer);
   }, [combat.status, isPlaying, resolveCombatEnd]);
 
-  const legalTargets = canAct ? getLegalPlayerClaimTargets(combat) : [];
-  // Threat piles aren't owned by any enemy (design doc 4.8) -- every alive
-  // enemy offered here is a legal target for the selected suit, picked by
-  // clicking its card in EnemyPanel rather than a separate menu.
+  const legalTargets = canAct ? getLegalPlaySets(combat) : [];
+  // Table piles aren't owned by any enemy -- every alive enemy offered here
+  // is a legal target for the selected suit, picked by clicking its card in
+  // EnemyPanel rather than a separate menu.
   const targetableInstanceIds = new Set(
     selectedSuit
       ? legalTargets.filter((t) => t.suit === selectedSuit && t.targetInstanceId).map((t) => t.targetInstanceId!)
@@ -102,7 +97,7 @@ export function CombatScreen() {
       const matching = combat.playerHand.filter((c) => c.kind === 'creature' && c.suit === card.suit);
       setSelectedSuit(card.suit);
       setSelectedIds(new Set(matching.map((c) => c.id)));
-      const targets = getLegalPlayerClaimTargets(combat).filter((t) => t.suit === card.suit);
+      const targets = getLegalPlaySets(combat).filter((t) => t.suit === card.suit);
       setSelectedTargetInstanceId(targets.length === 1 ? (targets[0].targetInstanceId ?? null) : null);
       return;
     }
@@ -115,30 +110,18 @@ export function CombatScreen() {
     });
   }
 
-  function handleClaim() {
+  function handlePlay() {
     if (!selectedSuit || selectedIds.size === 0) return;
     dispatchCombat({
-      type: 'PLAYER_CLAIM',
+      type: 'PLAY_SET',
       suit: selectedSuit,
       targetInstanceId: selectedTargetInstanceId ?? undefined,
       handCardIds: Array.from(selectedIds),
     });
-    // A claim doesn't always end the turn any more (see playsRemaining) --
+    // A play doesn't always end the turn any more (see playsRemaining) --
     // the turnNumber-change effect above only resets selection when the
     // whole turn ends, so clear it here unconditionally instead of leaving
-    // stale ids/suit pointing at cards this claim just removed from hand.
-    setSelectedSuit(null);
-    setSelectedIds(new Set());
-    setSelectedTargetInstanceId(null);
-  }
-
-  function handleFeed() {
-    if (!selectedSuit || selectedIds.size === 0) return;
-    dispatchCombat({
-      type: 'PLAYER_FEED',
-      suit: selectedSuit,
-      handCardIds: Array.from(selectedIds),
-    });
+    // stale ids/suit pointing at cards this play just removed from hand.
     setSelectedSuit(null);
     setSelectedIds(new Set());
     setSelectedTargetInstanceId(null);
@@ -148,25 +131,21 @@ export function CombatScreen() {
     dispatchCombat({ type: 'PLAYER_PASS' });
   }
 
-  // poolSetSize is a property of the suit's pool pile, not of any one
+  // tableSetSize is a property of the suit's table pile, not of any one
   // target -- every enemy offered for a threat suit shares the same value
-  // (see getLegalPlayerClaimTargets), so this must not filter by target or
-  // it reads as 0 while the player is still picking who to target.
-  const poolSetSize = selectedSuit
-    ? (legalTargets.find((t) => t.suit === selectedSuit)?.poolSetSize ?? 0)
+  // (see getLegalPlaySets), so this must not filter by target or it reads
+  // as 0 while the player is still picking who to target.
+  const tableSetSize = selectedSuit
+    ? (legalTargets.find((t) => t.suit === selectedSuit)?.tableSetSize ?? 0)
     : 0;
   const hasChosenTarget = suitNeedsNoTarget || selectedTargetInstanceId !== null;
   const hasPlaysLeft = combat.unlimitedPlaysThisTurn || combat.playsRemaining > 0;
-  const canClaim =
+  const canPlay =
     canAct &&
     hasPlaysLeft &&
     selectedSuit !== null &&
     selectedIds.size > 0 &&
-    hasChosenTarget &&
-    poolSetSize >= MIN_POOL_SET_SIZE;
-  const isSelectedSuitBlocked = selectedSuit !== null && (combat.blockedSuits[selectedSuit] ?? 0) > 0;
-  const canFeed =
-    canAct && selectedSuit !== null && isLegalFeed(combat, selectedSuit, Array.from(selectedIds));
+    hasChosenTarget;
 
   return (
     <div className="combat-screen">
@@ -201,16 +180,9 @@ export function CombatScreen() {
         )}
       </div>
 
-      <BlockedSuitBanner blockedSuits={combat.blockedSuits} />
-
       <div className="combat-main">
         <div className="combat-column">
-          <PoolDisplay
-            pool={combat.pool}
-            blockedSuits={combat.blockedSuits}
-            decayCounters={combat.decayCounters}
-            highlightSuit={selectedSuit}
-          />
+          <TableDisplay table={combat.table} enemies={combat.enemies} highlightSuit={selectedSuit} />
           <HandDisplay
             hand={combat.playerHand}
             selectedIds={selectedIds}
@@ -220,19 +192,16 @@ export function CombatScreen() {
             discardPileCount={combat.discardPile.length}
           />
           {combat.status === 'active' && (
-            <ClaimControls
+            <PlayControls
               isPlayerTurn={canAct}
               selectedSuitName={selectedSuit ? SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.name : null}
-              isSelectedSuitBlocked={isSelectedSuitBlocked}
-              poolSetSize={poolSetSize}
+              tableSetSize={tableSetSize}
               selectedCount={selectedIds.size}
-              canClaim={canClaim}
-              hasAnyLegalClaim={legalTargets.length > 0}
+              canPlay={canPlay}
+              hasAnyLegalPlay={legalTargets.length > 0}
               needsTarget={needsTarget}
               hasPlaysLeft={hasPlaysLeft}
-              canFeed={canFeed}
-              onClaim={handleClaim}
-              onFeed={handleFeed}
+              onPlay={handlePlay}
               onPass={handlePass}
             />
           )}

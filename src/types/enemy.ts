@@ -1,49 +1,22 @@
 import type { StatusBag } from './status';
-import type { SuitId } from './suits';
-
-export type IntentType = 'attack' | 'guard' | 'heal' | 'debuff' | 'poison' | 'strength' | 'corrupt' | 'feed';
-
-export type CorruptEffectType = 'add-cards' | 'block-suit' | 'force-discard';
-
-export interface IntentStep {
-  type: IntentType;
-  // Damage (attack), Guard banked (guard), Room-HP restored (heal), Weaken
-  // stacks applied to the player (debuff), Poison stacks applied to the
-  // player (poison), Strength stacks the enemy grants itself (strength), or
-  // cards added to the pool (feed) -- see engine/statusEffects.ts for how
-  // stacks resolve into magnitude. Unused for corrupt -- see corruptEffect
-  // instead.
-  magnitude?: number;
-  corruptEffect?: CorruptEffectType;
-  // feed only: which suit's pile grows by `magnitude` cards. Authored per
-  // pattern step, not chosen at random, matching every other intent's
-  // "deliberately memorizable" fixed-cycle design (MECHANIC_BRAINSTORM.md's
-  // "feed the pool" idea) -- an enemy always feeds the same pile at the same
-  // point in its cycle.
-  feedSuit?: SuitId;
-}
+import type { CreatureCard } from './cards';
 
 /**
- * Static, authored template for an enemy type. `pattern` is a fixed cycle,
- * not a random table -- deliberately memorizable (design decision: enemy
- * kits should read as "the same kind of threat every time," not a slot
- * machine). An enemy's currently-telegraphed step is
- * `pattern[instance.patternIndex % pattern.length]`.
- *
- * Enemies carry no suit of their own -- suits belong to the room's pool, not
- * to any one enemy (see RoomParams.threatSuits and design doc 4.8). A threat
- * claim can be aimed at any alive enemy regardless of which suits are in
- * the pool.
+ * Static, authored template for an enemy type. `deck` is a small, directly-
+ * authored card list (mirrors STARTER_DECK's style in config/constants.ts,
+ * not a ratio-generator) -- an enemy's suit slant IS its identity now, in
+ * place of the old fixed pattern cycle. See config/enemies.ts for the
+ * concrete rosters and per-enemy rationale.
  */
 export interface EnemyDef {
   id: string;
   name: string;
   hpMax: number;
   minFloor: number;
-  pattern: IntentStep[];
+  deck: CreatureCard[];
 }
 
-/** Runtime instance of an EnemyDef within one room -- two enemies can share a defId. */
+/** Runtime instance of an EnemyDef within one room -- two enemies can share a defId, each with its own independent hand/deck cycle. */
 export interface EnemyInstance {
   instanceId: string;
   defId: string;
@@ -51,8 +24,16 @@ export interface EnemyInstance {
   hp: number;
   hpMax: number;
   guard: number;
-  patternIndex: number;
-  // Weaken/Strength/Poison stacks this enemy currently holds (see
-  // engine/statusEffects.ts) -- decays by 1 per this enemy's own turn.
   statuses: StatusBag;
+  // Own persistent per-room hand/deck cycle, mirroring CombatState's
+  // playerHand/drawPile/discardPile 1:1 -- shuffled from a fresh copy of
+  // EnemyDef.deck and dealt an opening hand in initCombat, then fully
+  // discarded-and-redrawn at the end of THIS enemy's own turn (see
+  // engine/combatEngine.ts's resolveEnemyTurn), reshuffling discardPile
+  // into drawPile on empty exactly like engine/deckState.ts's drawCards
+  // already does for the player. Never shared between two same-defId
+  // instances -- each rolls its own shuffle from its own copy of the deck.
+  hand: CreatureCard[];
+  drawPile: CreatureCard[];
+  discardPile: CreatureCard[];
 }

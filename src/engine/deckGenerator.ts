@@ -15,8 +15,7 @@ export interface DeckParams {
   boonRatio: number;
   guardRatio: number;
   // Status suits (Hex/Venom/Vigor) -- optional, defaulting to 0, so callers
-  // that don't care about them (e.g. surpriseEffects's add-cards, which only
-  // ever wants on-suit) don't have to spell out three zeroes.
+  // that don't care about them don't have to spell out three zeroes.
   weakenRatio?: number;
   poisonRatio?: number;
   strengthRatio?: number;

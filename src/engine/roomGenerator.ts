@@ -2,7 +2,6 @@ import type { RoomInstance, RoomParams, PoolSizeBand } from '../types/room';
 import type { EnemyInstance } from '../types/enemy';
 import type { SuitId } from '../types/suits';
 import type { Rng } from './rng';
-import { generateWeightedDeck } from './deckGenerator';
 import { uniformPick, pickDistinct, weightedPick } from './weightedPick';
 import { ENEMY_DEFS } from '../config/enemies';
 import {
@@ -13,8 +12,8 @@ import {
   POISON_SUIT_RATIO,
   STRENGTH_SUIT_RATIO,
   PLAYER_HAND_SIZE,
-  ROOM_POOL_SIZE_SMALL,
-  ROOM_POOL_SIZE_LARGE,
+  ROOM_TABLE_DEAL_SMALL,
+  ROOM_TABLE_DEAL_LARGE,
   ROOM_MIN_ENEMIES,
   ROOM_MAX_ENEMIES,
   ENEMY_COUNT_WEIGHTS_EARLY,
@@ -50,20 +49,19 @@ function pickEnemyCount(floor: number, rng: Rng): number {
 }
 
 /**
- * Picks enemies eligible for `floor` (design doc 4.7's floor-gating knob),
- * with count scaled by depth (see pickEnemyCount). Duplicates are allowed
- * by design -- two Wolf-kin can appear in the same room, each independently
- * targetable via their own instanceId. Selection among eligible defs is
- * uniform; weighting the roll toward higher-minFloor defs as the floor
- * climbs is a documented open tuning knob, not implemented yet (see
- * PROTOTYPE_STATUS.md).
+ * Picks enemies eligible for `floor`, with count scaled by depth (see
+ * pickEnemyCount). Duplicates are allowed by design -- two Wolf-kin can
+ * appear in the same room, each independently targetable via their own
+ * instanceId, each with its own independent hand/deck cycle (dealt in
+ * combatEngine's initCombat, not here -- see hand/drawPile/discardPile's
+ * empty placeholders below). Selection among eligible defs is uniform;
+ * weighting the roll toward higher-minFloor defs as the floor climbs is a
+ * documented open tuning knob, not implemented yet.
  *
- * Same-defId duplicates start at staggered patternIndex offsets (0, 1, 2...
- * mod that def's pattern length) instead of all starting at 0
- * (PLAYTEST_FINDINGS.md Finding 3 -- previously every copy of a def
- * telegraphed and resolved in perfect lockstep, so a 3-enemy same-type pack
- * was one threat at 3x output rather than three independently readable
- * ones).
+ * Rooms are generated speculatively for both doors in a pair (only one is
+ * ever chosen) -- leaving hand/deck empty here, same as the player's own
+ * deck sitting un-shuffled/un-dealt until initCombat touches it, avoids
+ * spending RNG draws on a room that might be discarded.
  */
 function pickEnemies(floor: number, roomId: string, rng: Rng): EnemyInstance[] {
   const eligible = ENEMY_DEFS.filter((d) => d.minFloor <= floor);
@@ -71,11 +69,8 @@ function pickEnemies(floor: number, roomId: string, rng: Rng): EnemyInstance[] {
   const count = pickEnemyCount(floor, rng);
 
   const enemies: EnemyInstance[] = [];
-  const defOccurrences: Record<string, number> = {};
   for (let i = 0; i < count; i++) {
     const def = uniformPick(rng, pool);
-    const occurrence = defOccurrences[def.id] ?? 0;
-    defOccurrences[def.id] = occurrence + 1;
     enemies.push({
       instanceId: `${roomId}-enemy-${i}`,
       defId: def.id,
@@ -83,19 +78,19 @@ function pickEnemies(floor: number, roomId: string, rng: Rng): EnemyInstance[] {
       hp: def.hpMax,
       hpMax: def.hpMax,
       guard: 0,
-      patternIndex: occurrence % def.pattern.length,
       statuses: {},
+      hand: [],
+      drawPile: [],
+      discardPile: [],
     });
   }
   return enemies;
 }
 
 /**
- * Picks the threat suits woven into this room's pool -- a property of the
- * room's own "type" (currently just its size band, see design doc 4.8),
- * deliberately independent of which enemies pickEnemies happened to roll.
- * Enemies and pool piles are separate axes of room generation; a pile in
- * any of these suits can be claimed against any alive enemy.
+ * Picks the threat suits woven into this room's table -- a property of the
+ * room's own "type" (currently just its size band), deliberately
+ * independent of which enemies pickEnemies happened to roll.
  */
 function pickThreatSuits(sizeBand: PoolSizeBand, rng: Rng): SuitId[] {
   return pickDistinct(rng, THREAT_SUITS, THREAT_SUIT_COUNT_BY_SIZE_BAND[sizeBand]);
@@ -107,8 +102,8 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
 
   const sizeBand: PoolSizeBand = uniformPick(rng, ['small', 'large']);
   const [min, max] =
-    sizeBand === 'small' ? ROOM_POOL_SIZE_SMALL : ROOM_POOL_SIZE_LARGE;
-  const poolSize = rng.int(min, max);
+    sizeBand === 'small' ? ROOM_TABLE_DEAL_SMALL : ROOM_TABLE_DEAL_LARGE;
+  const tableDealSize = rng.int(min, max);
 
   const threatSuits = pickThreatSuits(sizeBand, rng);
   // Door color correlation uses one of the room's own threat suits as a
@@ -117,7 +112,7 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
   const primarySuit = uniformPick(rng, threatSuits);
 
   const params: RoomParams = {
-    poolSize,
+    tableDealSize,
     sizeBand,
     threatSuits,
     primarySuit,
@@ -130,20 +125,5 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
     strengthRatio: STRENGTH_SUIT_RATIO,
   };
 
-  const pool = generateWeightedDeck(
-    params.poolSize,
-    `${id}-pool`,
-    {
-      onSuitTargets: threatSuits,
-      onSuitRatio: params.onSuitRatio,
-      boonRatio: params.boonRatio,
-      guardRatio: params.guardRatio,
-      weakenRatio: params.weakenRatio,
-      poisonRatio: params.poisonRatio,
-      strengthRatio: params.strengthRatio,
-    },
-    rng,
-  );
-
-  return { id, params, enemies, pool };
+  return { id, params, enemies };
 }

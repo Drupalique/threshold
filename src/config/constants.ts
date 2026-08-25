@@ -1,7 +1,8 @@
 import type { SuitDef, SuitId } from '../types/suits';
 import type { DoorColor } from '../types/door';
 import type { PoolSizeBand } from '../types/room';
-import type { Card } from '../types/cards';
+import type { CreatureCard } from '../types/cards';
+import { cardCopies } from './cardHelpers';
 
 // --- Content data -----------------------------------------------------
 
@@ -15,7 +16,7 @@ export const SUIT_DEFINITIONS: SuitDef[] = [
   // Status suits: claiming one applies its StatusId's stacks to a target
   // (Hex/Venom, mirroring the enemy's own Debuff/Poison intents) or to the
   // player themself (Vigor, mirroring the enemy's own Strength intent) --
-  // see combatEngine.ts's performClaim and design doc 4.9's "next step."
+  // see combatEngine.ts's performPlay.
   { id: 'hex', name: 'Hex', category: 'weaken', displayColor: '#8e44ad' },
   { id: 'venom', name: 'Venom', category: 'poison', displayColor: '#229954' },
   { id: 'vigor', name: 'Vigor', category: 'strength', displayColor: '#d35400' },
@@ -29,9 +30,10 @@ export const BOON_SUIT: SuitId = SUIT_DEFINITIONS.find(
   (s) => s.category === 'boon',
 )!.id;
 
-// The player's exclusive defensive suit (asymmetry, not full mirroring):
-// claiming it banks Guard that absorbs the player's own incoming HP loss.
-// No enemy owns this suit, so it never appears tagged to an instance.
+// Banks Guard that absorbs its holder's own incoming HP loss. An ordinary
+// suit under full symmetry (Earthquake-style rewrite) -- any entity, player
+// or enemy, can hold and play it on itself. (Previously player-exclusive;
+// nothing in the engine ever branched on that, only a comment claimed it.)
 export const GUARD_SUIT: SuitId = SUIT_DEFINITIONS.find(
   (s) => s.category === 'guard',
 )!.id;
@@ -66,12 +68,19 @@ export const SUIT_COLOR_FAMILY: Record<SuitId, DoorColor | null> = {
 
 // --- Hands / pool -------------------------------------------------------
 
-export const PLAYER_HAND_SIZE = 5;
+export const PLAYER_HAND_SIZE = 7;
 
-export const ROOM_POOL_SIZE_SMALL: [number, number] = [6, 8];
-export const ROOM_POOL_SIZE_LARGE: [number, number] = [12, 16];
+// A room's table deal used to be sized to last the whole room (a pool,
+// refilled only when fully dry); now every round deals a fresh neutral
+// batch onto the table regardless of what's already there (see
+// combatEngine's dealRoomTable), so this needs to be sized for ONE round,
+// not a whole fight -- much smaller than the old 6-8/12-16. Kept nonzero
+// even at the low end so round 1 always has *something* live to seed a play
+// against.
+export const ROOM_TABLE_DEAL_SMALL: [number, number] = [2, 3];
+export const ROOM_TABLE_DEAL_LARGE: [number, number] = [4, 5];
 
-// How many distinct threat suits a room's pool draws from -- the "room
+// How many distinct threat suits a room's table draws from -- the "room
 // type" knob (design doc 4.8) that replaces "one threat suit per enemy
 // present." Deliberately keyed off sizeBand (an existing room-level
 // property) rather than the enemy roster, so pool variety is a fact about
@@ -120,26 +129,36 @@ export const STRENGTH_SUIT_RATIO = 0.08;
 
 export const PLAYER_HP_MAX = 30;
 
-export const DECAY_TURNS_N = 3;
-
-// The design doc (4.1) defines a set as "2+ cards in the pool" sharing a
-// suit -- i.e. the pool alone must supply both matching cards. This variant
-// lowers that to 1: a single pool card is claimable as long as the player
-// also holds >=1 matching hand card, so the "set" can be split 1-on-the-
-// table / 1-in-hand instead of requiring 2 on the table.
-export const MIN_POOL_SET_SIZE = 1;
-
-export const SURPRISE_ADD_CARDS_COUNT = 2;
-export const SURPRISE_BLOCK_DURATION_TURNS = 1;
-
 // --- Plays per turn ----------------------------------------------------
-// How many separate set-claims the player may make in a single turn before
-// it passes to the enemy phase, distinct from MIN_POOL_SET_SIZE (which
-// gates whether any one claim is legal at all). This is the hook point for
-// future temporary buffs/debuffs or per-run relics that grant (or cost) a
-// play -- for now the only modifier is the Quake card's unlimited-plays
-// effect (see CombatState.unlimitedPlaysThisTurn).
+// How many separate plays the player may make in a single turn before it
+// passes to the enemy phase. This is the hook point for future temporary
+// buffs/debuffs or per-run relics that grant (or cost) a play -- for now the
+// only modifier is the Quake card's unlimited-plays effect (see
+// CombatState.unlimitedPlaysThisTurn).
 export const PLAYS_PER_TURN_BASE = 2;
+
+// --- Enemies (symmetric play) ------------------------------------------
+
+// Smaller than PLAYER_HAND_SIZE (7) -- an enemy should usually have fewer
+// live options each turn than the player, echoing the old fixed-single-
+// intent-per-turn feel without literally fixing it. Each authored
+// EnemyDef.deck (config/enemies.ts) is sized around ~2.5x this so a full
+// discard-and-redraw cycle (every enemy's own turn, see
+// combatEngine.ts's resolveEnemyTurn) rarely needs a mid-hand reshuffle.
+export const ENEMY_HAND_SIZE = 4;
+
+// How many separate plays an enemy makes on its own turn before control
+// passes to the next enemy (or back to the player) -- deliberately half of
+// PLAYS_PER_TURN_BASE, to keep the enemy phase's pacing close to today's
+// one-action-per-enemy-per-beat feel rather than doubling combat's overall
+// action count now that enemies act "for real" instead of following a fixed
+// intent. No enemy analog of Quake exists -- this is never lifted.
+export const ENEMY_PLAYS_PER_TURN = 1;
+
+// Below this fraction of hpMax, engine/enemyAI.ts's chooseEnemyPlay biases
+// (not forces) an enemy toward a boon/guard suit it holds over pressing an
+// attack. First-cut number, not balance-tested.
+export const ENEMY_LOW_HP_HEAL_GUARD_THRESHOLD_PCT = 0.4;
 
 // --- Status effects ---------------------------------------------------
 // Weaken/Strength/Poison are stack counts that decay by 1 per holder turn
@@ -161,24 +180,16 @@ export const RUN_MAX_DEPTH = 10;
 // scattering of every support suit so an early room almost always has
 // *something* live to claim. A balance surface like every ratio constant
 // above; expect to retune after Phase 5 batch-sim data, not before.
-function starterCopies(suit: SuitId, count: number): Card[] {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `starter-${suit}-${i}`,
-    kind: 'creature' as const,
-    suit,
-  }));
-}
-
-export const STARTER_DECK: Card[] = [
-  ...starterCopies('wolf', 3),
-  ...starterCopies('ember', 3),
-  ...starterCopies('rot', 3),
-  ...starterCopies('spider', 3),
-  ...starterCopies('grace', 2),
-  ...starterCopies('ward', 2),
-  ...starterCopies('hex', 1),
-  ...starterCopies('venom', 1),
-  ...starterCopies('vigor', 1),
+export const STARTER_DECK: CreatureCard[] = [
+  ...cardCopies('wolf', 3, 'starter'),
+  ...cardCopies('ember', 3, 'starter'),
+  ...cardCopies('rot', 3, 'starter'),
+  ...cardCopies('spider', 3, 'starter'),
+  ...cardCopies('grace', 2, 'starter'),
+  ...cardCopies('ward', 2, 'starter'),
+  ...cardCopies('hex', 1, 'starter'),
+  ...cardCopies('venom', 1, 'starter'),
+  ...cardCopies('vigor', 1, 'starter'),
 ];
 
 // --- Rewards ------------------------------------------------------------

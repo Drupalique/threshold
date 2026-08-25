@@ -177,39 +177,16 @@ button {
   font-weight: 600;
 }
 
-.enemy-intent-badge {
-  padding: 0.1rem 0.5rem;
-  border-radius: 4px;
-  background: #333;
-  color: #eee;
-  font-size: 0.7rem;
-  font-weight: 600;
-  white-space: nowrap;
+.enemy-card-hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
 }
 
-.enemy-intent-badge--attack {
-  background: #7b2d2d;
-}
-.enemy-intent-badge--guard {
-  background: #1f6f5c;
-}
-.enemy-intent-badge--heal {
-  background: #7a6212;
-}
-.enemy-intent-badge--debuff {
-  background: #5a2a6b;
-}
-.enemy-intent-badge--poison {
-  background: #2f6b3a;
-}
-.enemy-intent-badge--strength {
-  background: #a5690d;
-}
-.enemy-intent-badge--corrupt {
-  background: #444;
-}
-.enemy-intent-badge--feed {
-  background: #2d5a2d;
+.enemy-card-hand-empty {
+  color: #777;
+  font-size: 0.75rem;
 }
 
 .combat-turn-indicator {
@@ -230,13 +207,6 @@ button {
 .combat-plays-remaining {
   color: #f1c40f;
   font-weight: 500;
-}
-
-.blocked-suit-banner {
-  text-align: center;
-  color: #f1c40f;
-  font-size: 0.9rem;
-  margin-bottom: 0.75rem;
 }
 
 /* --- Combat layout --- */
@@ -294,68 +264,115 @@ button {
   color: #fff;
 }
 
-/* --- Pool --- */
-
-.pool-groups {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-}
-
-.pool-group {
-  background: #1c1c26;
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
+.card-chip--static {
+  cursor: default;
   border: 2px solid transparent;
 }
 
-.pool-group--live {
-  border-color: #33334a;
+/* --- Table --- */
+
+/* Three sections, room in the visual middle between the enemies' lanes and
+   the player's own -- mirrors where a physical table would put a neutral
+   deal relative to the seated players. Stacks vertically once it can't fit
+   three columns side by side. */
+.table-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
 }
 
-.pool-group--blocked {
-  opacity: 0.5;
+@media (max-width: 720px) {
+  .table-board {
+    grid-template-columns: 1fr;
+  }
 }
 
-.pool-group--highlighted {
+.table-board-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.table-board-section--enemies {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.table-lane {
+  background: #17171f;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #2a2a3a;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.table-lane--room {
+  border-style: dashed;
+  background: #131318;
+}
+
+.table-lane--player {
+  border-color: #3a3a55;
+}
+
+.table-lane-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-bottom: 0.4rem;
+}
+
+.table-lane-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.table-lane-hint {
+  font-size: 0.65rem;
+  color: #777;
+}
+
+.table-lane-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.table-lane-empty {
+  color: #666;
+  font-size: 0.8rem;
+}
+
+.table-group {
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  border: 2px solid #33334a;
+}
+
+.table-group--highlighted {
   border-color: #4a4ae0;
 }
 
-/* Selected in hand but not actually claimable (fewer than 2 in the pool, or
-   blocked) -- deliberately distinct from the live-and-claimable highlight
-   above so a disabled Claim button never looks inconsistent with the pool. */
-.pool-group--highlighted-invalid {
-  border-color: #e74c3c;
-  border-style: dashed;
-}
-
-.pool-group-label {
+.table-group-label {
   font-size: 0.75rem;
   color: #aaa;
   margin-bottom: 0.35rem;
 }
 
-.pool-group-blocked-tag,
-.pool-group-toosmall-tag {
-  color: #f1c40f;
+.table-group-total {
+  color: #777;
 }
 
-.pool-group-decay-tag {
-  color: #888;
-}
-
-.pool-group-decay-tag--urgent {
-  color: #e74c3c;
-  font-weight: 600;
-}
-
-.pool-group-cards {
+.table-group-cards {
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
 }
 
-.pool-empty {
+.table-empty {
   color: #777;
 }
 
@@ -382,35 +399,34 @@ button {
   color: #777;
 }
 
-/* --- Claim controls --- */
+/* --- Play controls --- */
 
-.claim-controls {
+.play-controls {
   background: #1c1c26;
   border-radius: 8px;
   padding: 0.75rem 1rem;
 }
 
-.claim-controls-note {
+.play-controls-note {
   color: #999;
   font-size: 0.9rem;
 }
 
-.claim-preview {
+.play-preview {
   margin-bottom: 0.5rem;
 }
 
-.feed-preview {
-  margin-bottom: 0.5rem;
+.play-preview-banking {
   color: #7fbf7f;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
-.claim-controls-buttons {
+.play-controls-buttons {
   display: flex;
   gap: 0.5rem;
 }
 
-.claim-controls-buttons button {
+.play-controls-buttons button {
   border: none;
   border-radius: 6px;
   padding: 0.5rem 1rem;
@@ -418,7 +434,7 @@ button {
   color: white;
 }
 
-.claim-controls-buttons button:disabled {
+.play-controls-buttons button:disabled {
   background: #333;
   color: #777;
   cursor: default;
@@ -522,11 +538,6 @@ button {
   align-items: center;
   justify-content: center;
   margin-bottom: 0.75rem;
-}
-
-.door-card-texture {
-  color: rgba(255, 255, 255, 0.7);
-  font-style: italic;
 }
 
 .door-card-tags {

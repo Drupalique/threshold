@@ -1,64 +1,15 @@
 import type { EnemyInstance } from '../../types/enemy';
-import type { IntentType, CorruptEffectType } from '../../types/enemy';
+import type { CreatureCard } from '../../types/cards';
 import type { StatusId } from '../../types/status';
 import { STATUS_DEFS } from '../../types/status';
 import { SUIT_DEFINITIONS } from '../../config/constants';
-import { currentIntent } from '../../engine/roomIntent';
 import { MeterBar } from './MeterBar';
-
-const INTENT_LABEL: Record<IntentType, string> = {
-  attack: 'Attack',
-  guard: 'Guard',
-  heal: 'Heal',
-  debuff: 'Weaken',
-  poison: 'Poison',
-  strength: 'Strength',
-  corrupt: 'Corrupt',
-  feed: 'Feed',
-};
-
-const INTENT_ICON: Record<IntentType, string> = {
-  attack: '⚔',
-  guard: '\u{1F6E1}',
-  heal: '✚',
-  debuff: '☠',
-  poison: '\u{2623}',
-  strength: '\u{1F4AA}',
-  corrupt: '\u{1F300}',
-  feed: '\u{1F331}',
-};
 
 const STATUS_ICON: Record<StatusId, string> = {
   weaken: '☠',
   poison: '\u{2623}',
   strength: '\u{1F4AA}',
 };
-
-const CORRUPT_LABEL: Record<CorruptEffectType, string> = {
-  'add-cards': 'Reinforce',
-  'block-suit': 'Block Suit',
-  'force-discard': 'Discard',
-};
-
-function intentText(instance: EnemyInstance): string {
-  const step = currentIntent(instance);
-  const label = INTENT_LABEL[step.type];
-  switch (step.type) {
-    case 'attack':
-    case 'guard':
-    case 'heal':
-    case 'debuff':
-    case 'poison':
-    case 'strength':
-      return `${label} ${step.magnitude ?? 0}`;
-    case 'corrupt':
-      return `${label}: ${step.corruptEffect ? CORRUPT_LABEL[step.corruptEffect] : ''}`;
-    case 'feed': {
-      const suitLabel = step.feedSuit ? SUIT_DEFINITIONS.find((s) => s.id === step.feedSuit)!.name : '';
-      return `${label} ${suitLabel} +${step.magnitude ?? 0}`;
-    }
-  }
-}
 
 /** Small "Weaken 2" / "Poison 3" style badges for whatever stacks a holder (an enemy, or the player) currently carries. */
 export function StatusBadges({ statuses }: { statuses: Partial<Record<StatusId, number>> }) {
@@ -75,10 +26,23 @@ export function StatusBadges({ statuses }: { statuses: Partial<Record<StatusId, 
   );
 }
 
+// Non-interactive card display for an enemy's hand -- deliberately a <span>,
+// not the clickable CardChip <button>, since an enemy card here can itself
+// already be a <button> (when targetable) and nesting interactive elements
+// inside a <button> is invalid HTML.
+function StaticCardChip({ card }: { card: CreatureCard }) {
+  const suitDef = SUIT_DEFINITIONS.find((s) => s.id === card.suit)!;
+  return (
+    <span className="card-chip card-chip--static" style={{ background: suitDef.displayColor }}>
+      {suitDef.name}
+    </span>
+  );
+}
+
 interface EnemyPanelProps {
   enemies: EnemyInstance[];
-  // Threat piles aren't owned by any enemy (design doc 4.8) -- when a live
-  // threat claim is pending, every alive enemy here is a legal target, and
+  // Table piles aren't owned by any enemy -- when a live threat/weaken/
+  // poison play is pending, every alive enemy here is a legal target, and
   // the player picks by clicking the card directly rather than a separate
   // "which enemy?" menu.
   targetableInstanceIds?: Set<string>;
@@ -87,7 +51,10 @@ interface EnemyPanelProps {
 }
 
 // Live snapshot, not log-drip-animated like the player HP bar -- enemy HP
-// updates instantly (see PROTOTYPE_STATUS.md's noted simplification).
+// updates instantly. Each enemy's hand is shown face-up (not just a count)
+// so the player can plan around a specific enemy's live options, the
+// closest replacement for the old scripted-pattern telegraph now that
+// enemies choose their own plays from a hidden hand each turn.
 export function EnemyPanel({
   enemies,
   targetableInstanceIds,
@@ -99,7 +66,6 @@ export function EnemyPanel({
       <h3>Enemies</h3>
       <div className="enemy-panel-cards">
         {enemies.map((enemy) => {
-          const intent = currentIntent(enemy);
           const isTargetable = targetableInstanceIds?.has(enemy.instanceId) ?? false;
           const isSelected = isTargetable && selectedTargetInstanceId === enemy.instanceId;
           const className = [
@@ -117,9 +83,12 @@ export function EnemyPanel({
               <div className="enemy-card-badges">
                 {enemy.guard > 0 && <span className="enemy-guard-badge">Guard {enemy.guard}</span>}
                 <StatusBadges statuses={enemy.statuses} />
-                <span className={`enemy-intent-badge enemy-intent-badge--${intent.type}`}>
-                  {INTENT_ICON[intent.type]} {intentText(enemy)}
-                </span>
+              </div>
+              <div className="enemy-card-hand">
+                {enemy.hand.map((c) => (
+                  <StaticCardChip key={c.id} card={c} />
+                ))}
+                {enemy.hand.length === 0 && <span className="enemy-card-hand-empty">no cards</span>}
               </div>
             </>
           );
