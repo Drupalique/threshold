@@ -32,6 +32,7 @@ function makeRoom(overrides: Partial<RoomInstance> = {}): RoomInstance {
     id: 'test-room',
     params: {
       tableDealSize: 4,
+      dealsPerRound: { min: 1, max: 1 },
       sizeBand: 'small',
       threatSuits: ['wolf'],
       primarySuit: 'wolf',
@@ -469,6 +470,56 @@ describe('the room\'s automatic per-round deal', () => {
     state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // round ends -- room deals again
     expect(state.table.some((c) => c.id === 'r-old-1' || c.id === 'r-old-2')).toBe(false);
+  });
+});
+
+describe('room deal frequency (dealsPerRound)', () => {
+  it('deals dealsPerRound.max batches of tableDealSize in the opening round for a fixed-frequency room', () => {
+    const room = makeRoom({
+      params: { ...makeRoom().params, tableDealSize: 3, dealsPerRound: { min: 2, max: 2 } },
+    });
+    const rng = createRng(80);
+    const state = initCombat(room, rng, 30, 30, DEFAULT_DECK);
+    expect(state.table.filter((c) => c.ownerId === 'room').length).toBe(6); // 2 batches x 3 cards
+  });
+
+  it('deals dealsPerRound.max batches again on top of the unclaimed prior wave, for a steady two-a-turn room', () => {
+    const room = makeRoom({
+      params: { ...makeRoom().params, tableDealSize: 3, dealsPerRound: { min: 2, max: 2 } },
+    });
+    const rng = createRng(81);
+    let state: CombatState = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [],
+      enemies: [makeEnemy({ hand: [] })],
+    });
+
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // round ends -- room deals 2 batches
+
+    expect(state.table.filter((c) => c.ownerId === 'room').length).toBe(6); // 2 batches x 3 cards
+  });
+
+  it('rolls a fresh batch count each round, within its own [min,max], for an erratic-frequency room', () => {
+    const room = makeRoom({
+      params: { ...makeRoom().params, tableDealSize: 2, dealsPerRound: { min: 1, max: 4 } },
+    });
+    const rng = createRng(82);
+    let state: CombatState = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [],
+      enemies: [makeEnemy({ hand: [] })],
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const before = state.table.filter((c) => c.ownerId === 'room').length;
+      state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
+      state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+      const dealtThisRound = state.table.filter((c) => c.ownerId === 'room').length - before;
+      expect(dealtThisRound).toBeGreaterThanOrEqual(2); // 1 batch x 2 cards
+      expect(dealtThisRound).toBeLessThanOrEqual(8); // 4 batches x 2 cards
+      expect(dealtThisRound % 2).toBe(0); // always a whole number of tableDealSize-sized batches
+    }
   });
 });
 

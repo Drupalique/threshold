@@ -1,6 +1,6 @@
 import type { SuitDef, SuitId } from '../types/suits';
 import type { DoorColor } from '../types/door';
-import type { PoolSizeBand } from '../types/room';
+import type { PoolSizeBand, IntRange } from '../types/room';
 import type { CreatureCard } from '../types/cards';
 import { cardCopies } from './cardHelpers';
 
@@ -79,6 +79,19 @@ export const PLAYER_HAND_SIZE = 7;
 // against.
 export const ROOM_TABLE_DEAL_SMALL: [number, number] = [2, 3];
 export const ROOM_TABLE_DEAL_LARGE: [number, number] = [4, 5];
+
+// A room's per-round deal *frequency* -- how many separate tableDealSize
+// batches land on the table each round -- independent of tableDealSize
+// itself (how big each one of those batches is). One of these profiles is
+// picked uniformly per room at generation time (see roomGenerator's
+// pickDealFrequency) and then re-rolled within its own [min,max] every
+// round (dealRoomTableForRound): a steady one-a-turn room, a steady
+// two-a-turn room, and an erratic room anywhere from 1 to 3 a turn.
+export const ROOM_DEAL_FREQUENCY_PROFILES: IntRange[] = [
+  { min: 1, max: 1 },
+  { min: 2, max: 2 },
+  { min: 1, max: 3 },
+];
 
 // How many distinct threat suits a room's table draws from -- the "room
 // type" knob (design doc 4.8) that replaces "one threat suit per enemy

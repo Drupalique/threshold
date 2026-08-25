@@ -14,6 +14,7 @@ import {
   PLAYER_HAND_SIZE,
   ROOM_TABLE_DEAL_SMALL,
   ROOM_TABLE_DEAL_LARGE,
+  ROOM_DEAL_FREQUENCY_PROFILES,
   ROOM_MIN_ENEMIES,
   ROOM_MAX_ENEMIES,
   ENEMY_COUNT_WEIGHTS_EARLY,
@@ -104,6 +105,9 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
   const [min, max] =
     sizeBand === 'small' ? ROOM_TABLE_DEAL_SMALL : ROOM_TABLE_DEAL_LARGE;
   const tableDealSize = rng.int(min, max);
+  // Independent of sizeBand -- a room's deal frequency is its own knob, not
+  // derived from how big each batch is.
+  const dealsPerRound = uniformPick(rng, ROOM_DEAL_FREQUENCY_PROFILES);
 
   const threatSuits = pickThreatSuits(sizeBand, rng);
   // Door color correlation uses one of the room's own threat suits as a
@@ -113,6 +117,7 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
 
   const params: RoomParams = {
     tableDealSize,
+    dealsPerRound,
     sizeBand,
     threatSuits,
     primarySuit,

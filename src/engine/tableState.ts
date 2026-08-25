@@ -26,7 +26,7 @@ export function claimRoomCards(table: TableCard[], suit: SuitId): TableCard[] {
   return table.filter((c) => !(c.suit === suit && c.ownerId === 'room'));
 }
 
-/** Generates the room's neutral per-round table deal, tagged ownerId: 'room' -- reuses the same weighted-deck generator the room's pool used to be built from. */
+/** Generates one tableDealSize-sized batch of the room's neutral deal, tagged ownerId: 'room' -- reuses the same weighted-deck generator the room's pool used to be built from. */
 export function dealRoomTable(rng: Rng, roomParams: RoomParams, idPrefix: string): TableCard[] {
   const dealt = generateWeightedDeck(
     roomParams.tableDealSize,
@@ -45,4 +45,22 @@ export function dealRoomTable(rng: Rng, roomParams: RoomParams, idPrefix: string
   return dealt
     .filter(isCreatureCard)
     .map((c) => ({ id: c.id, suit: c.suit, ownerId: 'room' as const }));
+}
+
+/**
+ * Rolls how many tableDealSize batches land on the table this round, fresh
+ * from roomParams.dealsPerRound's own [min,max] every time this is called
+ * (a room with min===max always deals the same count; a wider range makes
+ * it erratic round to round), then deals and concatenates that many
+ * independent batches. Each batch gets its own id sub-prefix so card ids
+ * stay unique even when a room deals more than once in the same round.
+ */
+export function dealRoomTableForRound(rng: Rng, roomParams: RoomParams, idPrefix: string): TableCard[] {
+  const { min, max } = roomParams.dealsPerRound;
+  const batchCount = rng.int(min, max);
+  const dealt: TableCard[] = [];
+  for (let i = 0; i < batchCount; i++) {
+    dealt.push(...dealRoomTable(rng, roomParams, `${idPrefix}-b${i}`));
+  }
+  return dealt;
 }

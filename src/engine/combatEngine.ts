@@ -11,7 +11,7 @@ import type {
 } from '../types/combat';
 import type { Rng } from './rng';
 import { shuffleDeck, drawCards, topUpHand } from './deckState';
-import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTable } from './tableState';
+import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTableForRound } from './tableState';
 import { chooseEnemyPlay } from './enemyAI';
 import { enemyDefById } from '../config/enemies';
 import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken } from './statusEffects';
@@ -107,7 +107,7 @@ export function initCombat(
     return { ...e, hand, drawPile: enemyDrawPile, discardPile: enemyDiscardPile };
   });
 
-  const table = dealRoomTable(rng, room.params, `${room.id}-table-r1`);
+  const table = dealRoomTableForRound(rng, room.params, `${room.id}-table-r1`);
 
   return {
     table,
@@ -561,7 +561,7 @@ function endTurn(
   // back up to playerHandSize -- whatever's left in hand from last turn
   // stays, only the shortfall is drawn.
   const newTurnNumber = next.turnNumber + 1;
-  const freshRoomCards = dealRoomTable(rng, next.roomParams, `room-deal-t${newTurnNumber}`);
+  const freshRoomCards = dealRoomTableForRound(rng, next.roomParams, `room-deal-t${newTurnNumber}`);
   const table = wipeOwnerTable([...next.table, ...freshRoomCards], 'player');
 
   const { hand, drawPile, discardPile } = topUpHand(
