@@ -10,7 +10,7 @@ import type {
   TableOwnerId,
 } from '../types/combat';
 import type { Rng } from './rng';
-import { shuffleDeck, drawCards } from './deckState';
+import { shuffleDeck, drawCards, topUpHand } from './deckState';
 import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTable } from './tableState';
 import { chooseEnemyPlay } from './enemyAI';
 import { enemyDefById } from '../config/enemies';
@@ -418,17 +418,18 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
     next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'system', 'poison', poisonMessage, snapshotOf(next))] };
   }
 
-  // Discard the whole remaining hand and draw a fresh one from this
-  // enemy's own deck, in preparation for its next turn -- mirrors the
-  // player's own end-of-round redraw, just scoped to this one enemy.
+  // Top the remaining hand back up to ENEMY_HAND_SIZE, in preparation for
+  // its next turn -- whatever it didn't play stays in hand rather than
+  // being discarded, mirroring the player's own end-of-round top-up.
   const beforeRedraw = next.enemies.find((e) => e.instanceId === enemyId)!;
-  const { drawn, drawPile, discardPile } = drawCards(
+  const { hand, drawPile, discardPile } = topUpHand(
+    beforeRedraw.hand,
     beforeRedraw.drawPile,
-    [...beforeRedraw.discardPile, ...beforeRedraw.hand],
+    beforeRedraw.discardPile,
     ENEMY_HAND_SIZE,
     rng,
   );
-  next = updateEnemy(next, enemyId, (e) => ({ ...e, hand: drawn, drawPile, discardPile }));
+  next = updateEnemy(next, enemyId, (e) => ({ ...e, hand, drawPile, discardPile }));
 
   if (next.playerHP <= 0) {
     next = { ...next, status: 'player-dead' };
@@ -556,29 +557,30 @@ function endTurn(
   // contribution here -- any of its cards nobody claimed are still fair
   // game, so a fresh neutral wave is simply dealt on top of them (see
   // claimRoomCards for the only way room cards ever leave the table).
-  // The player's own table area still wipes, then the player's whole hand
-  // discards and a fresh one is drawn.
+  // The player's own table area still wipes, then the player's hand tops
+  // back up to playerHandSize -- whatever's left in hand from last turn
+  // stays, only the shortfall is drawn.
   const newTurnNumber = next.turnNumber + 1;
   const freshRoomCards = dealRoomTable(rng, next.roomParams, `room-deal-t${newTurnNumber}`);
   const table = wipeOwnerTable([...next.table, ...freshRoomCards], 'player');
 
-  const preRedrawDiscard = [...next.discardPile, ...next.playerHand];
-  const { drawn, drawPile, discardPile } = drawCards(
+  const { hand, drawPile, discardPile } = topUpHand(
+    next.playerHand,
     next.drawPile,
-    preRedrawDiscard,
+    next.discardPile,
     next.roomParams.playerHandSize,
     rng,
   );
   next = {
     ...next,
     table,
-    playerHand: drawn,
+    playerHand: hand,
     drawPile,
     discardPile,
     log: [
       ...next.log,
       makeLog(newTurnNumber, 'system', 'room-deal', 'The room deals a fresh wave onto the table.', snapshotOf(next)),
-      makeLog(newTurnNumber, 'system', 'redraw', 'Player draws a fresh hand.', {
+      makeLog(newTurnNumber, 'system', 'redraw', 'Player tops their hand back up.', {
         playerHP: next.playerHP,
         playerHPMax: next.playerHPMax,
         playerGuard: next.playerGuard,

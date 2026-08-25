@@ -27,12 +27,13 @@ export interface EnemyInstance {
   statuses: StatusBag;
   // Own persistent per-room hand/deck cycle, mirroring CombatState's
   // playerHand/drawPile/discardPile 1:1 -- shuffled from a fresh copy of
-  // EnemyDef.deck and dealt an opening hand in initCombat, then fully
-  // discarded-and-redrawn at the end of THIS enemy's own turn (see
-  // engine/combatEngine.ts's resolveEnemyTurn), reshuffling discardPile
-  // into drawPile on empty exactly like engine/deckState.ts's drawCards
-  // already does for the player. Never shared between two same-defId
-  // instances -- each rolls its own shuffle from its own copy of the deck.
+  // EnemyDef.deck and dealt an opening hand in initCombat, then topped back
+  // up to ENEMY_HAND_SIZE at the end of THIS enemy's own turn (see
+  // engine/combatEngine.ts's resolveEnemyTurn), keeping whatever it didn't
+  // play, reshuffling discardPile into drawPile on empty exactly like
+  // engine/deckState.ts's topUpHand already does for the player. Never
+  // shared between two same-defId instances -- each rolls its own shuffle
+  // from its own copy of the deck.
   hand: CreatureCard[];
   drawPile: CreatureCard[];
   discardPile: CreatureCard[];

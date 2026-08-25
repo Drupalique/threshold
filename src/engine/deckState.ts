@@ -42,3 +42,28 @@ export function drawCards<T extends Card>(drawPile: T[], discardPile: T[], n: nu
 
   return { drawn, drawPile: draw, discardPile: discard };
 }
+
+export interface TopUpResult<T extends Card> {
+  hand: T[];
+  drawPile: T[];
+  discardPile: T[];
+}
+
+/**
+ * Tops `hand` up to `handSize`, drawing only the shortfall and leaving
+ * whatever's already in hand untouched -- the "draw up to your hand size
+ * at the start of your own turn, keeping leftover cards" rule, shared by
+ * the player and every enemy. A hand already at or above handSize draws
+ * nothing and is returned as-is.
+ */
+export function topUpHand<T extends Card>(
+  hand: T[],
+  drawPile: T[],
+  discardPile: T[],
+  handSize: number,
+  rng: Rng,
+): TopUpResult<T> {
+  const needed = Math.max(0, handSize - hand.length);
+  const { drawn, drawPile: nextDrawPile, discardPile: nextDiscardPile } = drawCards(drawPile, discardPile, needed, rng);
+  return { hand: [...hand, ...drawn], drawPile: nextDrawPile, discardPile: nextDiscardPile };
+}

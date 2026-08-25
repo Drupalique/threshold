@@ -937,19 +937,29 @@ describe('enemy AI (engine/enemyAI.ts)', () => {
 });
 
 describe('hand discard & redraw (persistent deck) -- player', () => {
-  it('discards the whole hand and draws a fresh one once the enemy phase concludes, conserving every card', () => {
+  it('keeps unplayed hand cards and only tops up the shortfall once the enemy phase concludes, conserving every card', () => {
     const room = makeRoom();
     const rng = createRng(17);
     const deck = makeDeck('wolf', 8, 'pd');
     let state = initCombat(room, rng, 30, 30, deck);
     const originalHandIds = state.playerHand.map((c) => c.id);
+    const playedId = originalHandIds[0];
 
+    state = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: [playedId] },
+      rng,
+    );
     state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     expect(state.activeTurn).toBe('player');
     expect(state.playerHand.length).toBe(room.params.playerHandSize);
-    expect(state.playerHand.map((c) => c.id)).not.toEqual(originalHandIds);
+    // Every card that wasn't played stays in hand -- only the played card's slot got refilled.
+    for (const id of originalHandIds.slice(1)) {
+      expect(state.playerHand.some((c) => c.id === id)).toBe(true);
+    }
+    expect(state.playerHand.some((c) => c.id === playedId)).toBe(false);
     expect(state.log.some((l) => l.type === 'redraw')).toBe(true);
 
     const allIdsNow = new Set([

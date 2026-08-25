@@ -142,9 +142,9 @@ export const PLAYS_PER_TURN_BASE = 2;
 // Smaller than PLAYER_HAND_SIZE (7) -- an enemy should usually have fewer
 // live options each turn than the player, echoing the old fixed-single-
 // intent-per-turn feel without literally fixing it. Each authored
-// EnemyDef.deck (config/enemies.ts) is sized around ~2.5x this so a full
-// discard-and-redraw cycle (every enemy's own turn, see
-// combatEngine.ts's resolveEnemyTurn) rarely needs a mid-hand reshuffle.
+// EnemyDef.deck (config/enemies.ts) is sized around ~2.5x this so the
+// hand's per-turn top-up (every enemy's own turn, see combatEngine.ts's
+// resolveEnemyTurn) rarely needs a mid-hand reshuffle.
 export const ENEMY_HAND_SIZE = 4;
 
 // How many separate plays an enemy makes on its own turn before control
