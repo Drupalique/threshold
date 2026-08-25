@@ -98,9 +98,10 @@ describe('legality and plays per turn', () => {
     // table set size 4 x 3 hand cards = 12 damage to the enemy
     expect(next.enemies[0].hp).toBe(20 - 12);
     expect(next.playerHand.map((c) => c.id)).not.toContain('ph1');
-    // The played cards land on the table too (tagged to the player), not removed anywhere.
+    // The played cards land on the table too, tagged to the player.
     expect(next.table.filter((c) => c.suit === 'wolf' && c.ownerId === 'player').length).toBe(3);
-    expect(next.table.filter((c) => c.suit === 'wolf' && c.ownerId === 'room').length).toBe(4);
+    // The room's 4 wolf cards were just claimed by this play -- gone.
+    expect(next.table.filter((c) => c.suit === 'wolf' && c.ownerId === 'room').length).toBe(0);
   });
 
   it('a lethal play defeats the enemy and clears the room when it was the last one', () => {
@@ -151,8 +152,10 @@ describe('legality and plays per turn', () => {
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph2'] },
       rng,
     );
-    // Second play compounds off the first play's own contribution (2 wolf now on table: room's 1 + player's 1 from the prior play).
-    expect(state.enemies[0].hp).toBe(20 - 1 - 2);
+    // The first play already claimed the room's 1 wolf card, so the second
+    // play only compounds off the player's own contribution from the prior
+    // play (1 wolf now on the table).
+    expect(state.enemies[0].hp).toBe(20 - 1 - 1);
     expect(state.activeTurn).toBe('enemy'); // plays exhausted -- turn actually ends now
   });
 
@@ -325,8 +328,8 @@ describe('same-turn compounding', () => {
   });
 });
 
-describe('Quake enables profitable self-compounding by splitting a suit into singles', () => {
-  it('splitting a suit into N one-card plays deals strictly more than one N-card play, since each single reads the table fresh', () => {
+describe('claiming the room caps Quake self-compounding by splitting a suit into singles', () => {
+  it('splitting a suit into N one-card plays deals strictly less than one N-card play, since the first single already claims the room\'s whole stockpile', () => {
     const bigPlayRoom = makeRoom();
     const rngBig = createRng(42);
     let bigPlayState: CombatState = makeCombat(bigPlayRoom, rngBig, 30, 30, {
@@ -375,9 +378,12 @@ describe('Quake enables profitable self-compounding by splitting a suit into sin
       );
     }
     const splitDamage = 20 - splitState.enemies[0].hp;
-    expect(splitDamage).toBe(3 + 4 + 5); // table count climbs by 1 with each single play
+    // The first single claims all 3 room wolf cards (3 table x 1 hand = 3),
+    // leaving nothing but the player's own prior contribution to compound
+    // off of for the next two singles (1 table x 1 = 1, then 2 table x 1 = 2).
+    expect(splitDamage).toBe(3 + 1 + 2);
 
-    expect(splitDamage).toBeGreaterThan(bigPlayDamage);
+    expect(splitDamage).toBeLessThan(bigPlayDamage);
   });
 });
 
@@ -416,7 +422,7 @@ describe('persistence across owners until each owner\'s own-turn start wipe', ()
 });
 
 describe('the room\'s automatic per-round deal', () => {
-  it('wipes its own prior contribution and deals a fresh wave every round, never reachable via a dispatched action', () => {
+  it('keeps its unclaimed prior contribution and deals a fresh wave on top every round, never reachable via a dispatched action', () => {
     const room = makeRoom({ params: { ...makeRoom().params, tableDealSize: 3 } });
     const rng = createRng(60);
     let state: CombatState = makeCombat(room, rng, 30, 30, {
@@ -429,12 +435,40 @@ describe('the room\'s automatic per-round deal', () => {
     });
 
     state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
-    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // round ends -- room redeals
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // round ends -- room deals again
 
     const newRoomCards = state.table.filter((c) => c.ownerId === 'room');
-    expect(newRoomCards.length).toBeGreaterThan(0);
-    expect(newRoomCards.some((c) => c.id === 'r-old-1' || c.id === 'r-old-2')).toBe(false);
+    // Nothing claimed the old cards this round -- they're still there, on
+    // top of whatever the fresh deal added.
+    expect(newRoomCards.some((c) => c.id === 'r-old-1')).toBe(true);
+    expect(newRoomCards.some((c) => c.id === 'r-old-2')).toBe(true);
+    expect(newRoomCards.length).toBeGreaterThan(2);
     expect(state.log.some((l) => l.type === 'room-deal')).toBe(true);
+  });
+
+  it('is claimed away by a play, and does not come back on its own the next round', () => {
+    const room = makeRoom({ params: { ...makeRoom().params, tableDealSize: 3 } });
+    const rng = createRng(61);
+    let state: CombatState = makeCombat(room, rng, 30, 30, {
+      table: [
+        { id: 'r-old-1', suit: 'wolf', ownerId: 'room' },
+        { id: 'r-old-2', suit: 'wolf', ownerId: 'room' },
+      ],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+      enemies: [makeEnemy({ hand: [] })],
+    });
+
+    state = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+    // Claimed the instant the play read the wolf table count.
+    expect(state.table.some((c) => c.id === 'r-old-1' || c.id === 'r-old-2')).toBe(false);
+
+    state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
+    state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng); // round ends -- room deals again
+    expect(state.table.some((c) => c.id === 'r-old-1' || c.id === 'r-old-2')).toBe(false);
   });
 });
 

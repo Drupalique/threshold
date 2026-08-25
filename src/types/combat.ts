@@ -8,17 +8,25 @@ export type CombatActor = 'player' | 'enemy';
 export type CombatStatus = 'active' | 'room-cleared' | 'player-dead';
 
 // 'room' | 'player' | an EnemyInstance.instanceId -- who played a given
-// table card. Determines whose own-turn-start wipe removes it (see
-// combatEngine's wipeOwnerTable); nothing else ever removes a table card.
+// table card. For 'player' and an enemy instanceId, this determines whose
+// own-turn-start wipe removes it (see combatEngine's wipeOwnerTable). For
+// 'room', ownership instead determines when a play "claims" it -- the
+// moment any combatant reads that card's suit's table count, it's removed
+// (see tableState's claimRoomCards) -- so a room card can sit on the table
+// across many rounds, growing that suit's stockpile, until someone
+// actually plays into it.
 export type TableOwnerId = 'room' | 'player' | string;
 
 /**
  * One suited card sitting on the shared table, tagged with who played it.
- * Replaces the old shared `pool: Card[]` entirely -- a play never removes
- * anything from the table any more (see combatEngine's performPlay), so the
- * table only ever grows within a round and only ever shrinks via an owner's
- * own-turn-start wipe. Quake cards never appear here -- same as the old
- * pool, only creature-suited cards land on the table.
+ * Replaces the old shared `pool: Card[]` entirely -- a play never removes a
+ * player's or an enemy's own contribution from the table (see
+ * combatEngine's performPlay), so those only ever grow within a round and
+ * only ever shrink via their owner's own-turn-start wipe. The room's own
+ * cards are the exception: they persist and accumulate across rounds too,
+ * but shrink the moment a play claims them (see claimRoomCards). Quake
+ * cards never appear here -- same as the old pool, only creature-suited
+ * cards land on the table.
  */
 export interface TableCard {
   id: string;

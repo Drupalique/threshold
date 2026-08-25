@@ -51,7 +51,9 @@ function OwnerLane({
       <div className="table-lane-header">
         <span className="table-lane-name">{ownerLabel(ownerId, enemies)}</span>
         <span className="table-lane-hint">
-          clears at {ownerId === 'player' ? 'your' : `${ownerLabel(ownerId, enemies)}'s`} turn
+          {ownerId === 'room'
+            ? 'clears only when a play claims it'
+            : `clears at ${ownerId === 'player' ? 'your' : `${ownerLabel(ownerId, enemies)}'s`} turn`}
         </span>
       </div>
       <div className="table-lane-groups">
@@ -89,9 +91,11 @@ function OwnerLane({
   );
 }
 
-// A card's owner (who played it) is core information, not a footnote -- it
-// determines whose own-turn-start wipe clears it (see tableState's
-// wipeOwnerTable). Laid out as owner lanes rather than suit-first groups so
+// A card's owner (who played it) is core information, not a footnote -- for
+// the player and each enemy it determines whose own-turn-start wipe clears
+// it (see tableState's wipeOwnerTable); for the room it determines when a
+// play claims it instead (see claimRoomCards). Laid out as owner lanes
+// rather than suit-first groups so
 // each entity's play area reads as obviously theirs, with the room's neutral
 // deal sitting in the visual middle between the enemies' lanes and the
 // player's, mirroring where a physical shared table would put untargeted

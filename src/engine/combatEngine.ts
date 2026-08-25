@@ -11,7 +11,7 @@ import type {
 } from '../types/combat';
 import type { Rng } from './rng';
 import { shuffleDeck, drawCards } from './deckState';
-import { countTableSetSize, wipeOwnerTable, dealRoomTable } from './tableState';
+import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTable } from './tableState';
 import { chooseEnemyPlay } from './enemyAI';
 import { enemyDefById } from '../config/enemies';
 import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken } from './statusEffects';
@@ -209,9 +209,14 @@ function actorNameOf(state: CombatState, actor: Actor): string {
  * The one and only "play a set" resolver -- used for both the player's
  * dispatched PLAY_SET action and each enemy's own turn. magnitude =
  * handCardIds.length x (matching table cards visible BEFORE this play, from
- * every owner combined) -- nothing is ever removed from the table by a
- * play; the played cards are simply appended, tagged with the actor's own
- * ownerId, on top of whatever was already there. A 0-magnitude play (no
+ * every owner combined). Player/enemy contributions already on the table
+ * are never touched by a play -- they're simply appended to, tagged with
+ * the actor's own ownerId, on top of whatever was already there, and only
+ * clear via their owner's own-turn-start wipe. The room's own matching
+ * cards are the one exception: reading their count here is what "claims"
+ * them, so they're removed the moment they're read (see claimRoomCards) --
+ * that's the whole reason unclaimed room cards are safe to let accumulate
+ * across rounds instead of being wiped every round. A 0-magnitude play (no
  * matching table cards yet) is a legitimate "banking" play -- what the old
  * game called feeding, now just the degenerate case of playing.
  *
@@ -260,7 +265,10 @@ function performPlay(
   }
   next = {
     ...next,
-    table: [...next.table, ...playedCards.map((c) => ({ id: c.id, suit: c.suit, ownerId }))],
+    table: [
+      ...claimRoomCards(next.table, suit),
+      ...playedCards.map((c) => ({ id: c.id, suit: c.suit, ownerId })),
+    ],
   };
 
   let effectDesc: string;
@@ -543,15 +551,16 @@ function endTurn(
     };
   }
 
-  // The whole enemy phase just concluded -- a new round begins. The room
-  // (just another table owner whose "turn" falls here) discards its own
-  // prior contribution and deals a fresh neutral wave, then the player's
-  // own table area wipes, then the player's whole hand discards and a
-  // fresh one is drawn.
+  // The whole enemy phase just concluded -- a new round begins. Unlike the
+  // player and every enemy, the room never wipes its own prior
+  // contribution here -- any of its cards nobody claimed are still fair
+  // game, so a fresh neutral wave is simply dealt on top of them (see
+  // claimRoomCards for the only way room cards ever leave the table).
+  // The player's own table area still wipes, then the player's whole hand
+  // discards and a fresh one is drawn.
   const newTurnNumber = next.turnNumber + 1;
-  const roomWiped = wipeOwnerTable(next.table, 'room');
   const freshRoomCards = dealRoomTable(rng, next.roomParams, `room-deal-t${newTurnNumber}`);
-  const table = wipeOwnerTable([...roomWiped, ...freshRoomCards], 'player');
+  const table = wipeOwnerTable([...next.table, ...freshRoomCards], 'player');
 
   const preRedrawDiscard = [...next.discardPile, ...next.playerHand];
   const { drawn, drawPile, discardPile } = drawCards(
