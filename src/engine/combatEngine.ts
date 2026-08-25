@@ -207,18 +207,21 @@ function actorNameOf(state: CombatState, actor: Actor): string {
 
 /**
  * The one and only "play a set" resolver -- used for both the player's
- * dispatched PLAY_SET action and each enemy's own turn. magnitude =
- * handCardIds.length x (matching table cards visible BEFORE this play, from
- * every owner combined). Player/enemy contributions already on the table
- * are never touched by a play -- they're simply appended to, tagged with
- * the actor's own ownerId, on top of whatever was already there, and only
- * clear via their owner's own-turn-start wipe. The room's own matching
+ * dispatched PLAY_SET action and each enemy's own turn. A played set is
+ * itself a multiplicative set on the table: magnitude = handCardIds.length x
+ * (matching table cards visible BEFORE this play, from every owner combined,
+ * PLUS the cards this play itself adds). Playing 2 of a suit onto an empty
+ * table is 2 played x 2 now on the table = 4; playing 2 more onto an
+ * existing 3 is 2 played x 5 now on the table = 10. Every play therefore has
+ * an effect, even the very first one into an empty table -- there's no more
+ * 0-magnitude "banking" play. Player/enemy contributions already on the
+ * table are never touched by a play -- they're simply appended to, tagged
+ * with the actor's own ownerId, on top of whatever was already there, and
+ * only clear via their owner's own-turn-start wipe. The room's own matching
  * cards are the one exception: reading their count here is what "claims"
  * them, so they're removed the moment they're read (see claimRoomCards) --
  * that's the whole reason unclaimed room cards are safe to let accumulate
- * across rounds instead of being wiped every round. A 0-magnitude play (no
- * matching table cards yet) is a legitimate "banking" play -- what the old
- * game called feeding, now just the degenerate case of playing.
+ * across rounds instead of being wiped every round.
  *
  * Targeting: threat/weaken/poison plays by the player require a chosen
  * enemy (targetInstanceId); the same categories played by an enemy always
@@ -238,8 +241,9 @@ function performPlay(
   const strengthStacks = isThreat ? stacksOf(actorStatuses, 'strength') : 0;
   const weakenStacks = isThreat ? stacksOf(actorStatuses, 'weaken') : 0;
   const tableCountBefore = countTableSetSize(state.table, suit);
-  const boostedBase = isThreat ? withStrength(tableCountBefore, actorStatuses) : tableCountBefore;
-  const rawMagnitude = boostedBase * handCardIds.length;
+  const tableCountAfterPlay = tableCountBefore + handCardIds.length;
+  const boostedTotal = isThreat ? withStrength(tableCountAfterPlay, actorStatuses) : tableCountAfterPlay;
+  const rawMagnitude = boostedTotal * handCardIds.length;
   const magnitude = isThreat ? withWeaken(rawMagnitude, actorStatuses, WEAKEN_PCT_PER_STACK) : rawMagnitude;
 
   const ownerId = ownerIdOf(actor);
@@ -362,7 +366,7 @@ function performPlay(
         next.turnNumber,
         actor.kind === 'player' ? 'player' : 'enemy',
         'play',
-        `${actorName} plays ${suitName(suit)}${targetName ? ` at ${targetName}` : ''} (${handCardIds.length} card(s) x ${tableCountBefore} on the table)${weakenNote}${strengthNote} -- ${effectDesc}.`,
+        `${actorName} plays ${suitName(suit)}${targetName ? ` at ${targetName}` : ''} (${handCardIds.length} card(s) x ${tableCountAfterPlay} on the table)${weakenNote}${strengthNote} -- ${effectDesc}.`,
         snapshotOf(next),
       ),
     ],

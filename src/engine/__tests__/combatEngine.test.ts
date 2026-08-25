@@ -77,8 +77,8 @@ function makeCombat(
 }
 
 describe('legality and plays per turn', () => {
-  it('is multiplicative: table set size x hand cards played, damaging the targeted enemy', () => {
-    const room = makeRoom();
+  it('is multiplicative: the play itself joins the table set it multiplies against, damaging the targeted enemy', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
     const rng = createRng(1);
     const state = makeCombat(room, rng, 30, 30, {
       table: [
@@ -96,8 +96,8 @@ describe('legality and plays per turn', () => {
       rng,
     );
 
-    // table set size 4 x 3 hand cards = 12 damage to the enemy
-    expect(next.enemies[0].hp).toBe(20 - 12);
+    // 4 already on the table + 3 played = 7 on the table x 3 hand cards = 21 damage
+    expect(next.enemies[0].hp).toBe(30 - 21);
     expect(next.playerHand.map((c) => c.id)).not.toContain('ph1');
     // The played cards land on the table too, tagged to the player.
     expect(next.table.filter((c) => c.suit === 'wolf' && c.ownerId === 'player').length).toBe(3);
@@ -146,7 +146,7 @@ describe('legality and plays per turn', () => {
     );
     expect(state.activeTurn).toBe('player'); // first of two plays -- turn continues
     expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE - 1);
-    expect(state.enemies[0].hp).toBe(20 - 1); // table set size 1 x 1 hand card
+    expect(state.enemies[0].hp).toBe(20 - 2); // 1 already on the table + 1 played = 2 on the table x 1 hand card
 
     state = applyCombatAction(
       state,
@@ -155,8 +155,8 @@ describe('legality and plays per turn', () => {
     );
     // The first play already claimed the room's 1 wolf card, so the second
     // play only compounds off the player's own contribution from the prior
-    // play (1 wolf now on the table).
-    expect(state.enemies[0].hp).toBe(20 - 1 - 1);
+    // play (1 wolf now on the table, + this play's own 1 = 2).
+    expect(state.enemies[0].hp).toBe(20 - 2 - 2);
     expect(state.activeTurn).toBe('enemy'); // plays exhausted -- turn actually ends now
   });
 
@@ -176,7 +176,7 @@ describe('legality and plays per turn', () => {
     expect(rejected).toBe(state); // illegal play, state unchanged
   });
 
-  it('a 0-magnitude play (nothing matching on the table yet) is legal and banks the cards for later', () => {
+  it('a play into an empty table still has an effect, since the play itself becomes the table set it multiplies against', () => {
     const room = makeRoom({ params: { ...makeRoom().params, threatSuits: ['rot'] } });
     const rng = createRng(33);
     const state = makeCombat(room, rng, 30, 30, {
@@ -191,8 +191,8 @@ describe('legality and plays per turn', () => {
       { type: 'PLAY_SET', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
     );
-    expect(next.enemies[0].hp).toBe(20); // 0 table count x 2 hand cards = 0
-    expect(next.table.filter((c) => c.suit === 'rot' && c.ownerId === 'player').length).toBe(2); // still banked on the table
+    expect(next.enemies[0].hp).toBe(20 - 4); // 0 already on the table + 2 played = 2 on the table x 2 hand cards = 4
+    expect(next.table.filter((c) => c.suit === 'rot' && c.ownerId === 'player').length).toBe(2); // played cards still land on the table
   });
 
   it('a Quake card grants unlimited plays for the rest of the turn until the player passes', () => {
@@ -275,7 +275,7 @@ describe('table piles are independent of any specific enemy', () => {
     const e1 = next.enemies.find((e) => e.instanceId === 'e1');
     const e2 = next.enemies.find((e) => e.instanceId === 'e2');
     expect(e1?.hp).toBe(10); // untouched -- the player freely chose e2 instead
-    expect(e2).toBeUndefined(); // table set size 5 x 2 hand cards = 10, exactly lethal
+    expect(e2).toBeUndefined(); // 5 already on the table + 2 played = 7 on the table x 2 hand cards = 14, lethal
   });
 });
 
@@ -295,8 +295,8 @@ describe('table multiplier math', () => {
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
     );
-    // 1 hand card x 2 table cards (1 from room, 1 from the enemy itself) = 2
-    expect(next.enemies[0].hp).toBe(20 - 2);
+    // 2 already on the table (1 from room, 1 from the enemy itself) + 1 played = 3 on the table x 1 hand card = 3
+    expect(next.enemies[0].hp).toBe(20 - 3);
   });
 });
 
@@ -317,15 +317,15 @@ describe('same-turn compounding', () => {
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
     );
-    expect(state.enemies[0].hp).toBe(20); // 0 table count x 1 = 0
+    expect(state.enemies[0].hp).toBe(19); // 0 already on the table + 1 played = 1 on the table x 1 hand card = 1
 
     state = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph2'] },
       rng,
     );
-    // The first play's own card is now on the table -- 1 table count x 1 hand card = 1
-    expect(state.enemies[0].hp).toBe(19);
+    // The first play's own card is now on the table -- 1 already there + 1 played = 2 on the table x 1 hand card = 2
+    expect(state.enemies[0].hp).toBe(17);
   });
 });
 
@@ -353,7 +353,7 @@ describe('claiming the room caps Quake self-compounding by splitting a suit into
       rngBig,
     );
     const bigPlayDamage = 20 - bigPlayState.enemies[0].hp;
-    expect(bigPlayDamage).toBe(9); // 3 table x 3 hand cards
+    expect(bigPlayDamage).toBe(18); // 3 already on the table + 3 played = 6 on the table x 3 hand cards
 
     const splitRoom = makeRoom();
     const rngSplit = createRng(43);
@@ -379,10 +379,12 @@ describe('claiming the room caps Quake self-compounding by splitting a suit into
       );
     }
     const splitDamage = 20 - splitState.enemies[0].hp;
-    // The first single claims all 3 room wolf cards (3 table x 1 hand = 3),
-    // leaving nothing but the player's own prior contribution to compound
-    // off of for the next two singles (1 table x 1 = 1, then 2 table x 1 = 2).
-    expect(splitDamage).toBe(3 + 1 + 2);
+    // The first single claims all 3 room wolf cards (3 already there + 1
+    // played = 4 on the table x 1 hand = 4), leaving nothing but the
+    // player's own prior contribution to compound off of for the next two
+    // singles (1 already there + 1 played = 2 x 1 = 2, then 2 already there
+    // + 1 played = 3 x 1 = 3).
+    expect(splitDamage).toBe(4 + 2 + 3);
 
     expect(splitDamage).toBeLessThan(bigPlayDamage);
   });
@@ -536,7 +538,7 @@ describe('enemy turn resolution', () => {
     });
 
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    expect(next.playerHP).toBe(30 - 1); // 1 table wolf x 1 hand card
+    expect(next.playerHP).toBe(30 - 2); // 1 already on the table + 1 played = 2 on the table x 1 hand card
     expect(next.log.some((l) => l.type === 'play' && l.actor === 'enemy')).toBe(true);
   });
 
@@ -569,7 +571,8 @@ describe('guard suit (Ward)', () => {
     });
     const next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'ward', handCardIds: ['ph1'] }, rng);
 
-    expect(next.playerGuard).toBe(2);
+    // 2 already on the table + 1 played = 3 on the table x 1 hand card = 3
+    expect(next.playerGuard).toBe(3);
     expect(next.playerHP).toBe(30);
     expect(next.enemies[0].hp).toBe(20);
   });
@@ -587,9 +590,9 @@ describe('guard suit (Ward)', () => {
     });
 
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    // table wolf count 1 x 1 hand card = 1; fully absorbed by the 2 banked Guard
+    // 1 already on the table + 1 played = 2 on the table x 1 hand card = 2; fully absorbed by the 2 banked Guard
     expect(state.playerHP).toBe(30);
-    expect(state.playerGuard).toBe(1);
+    expect(state.playerGuard).toBe(0);
   });
 
   it('an enemy playing Ward banks Guard on itself, not the player', () => {
@@ -605,7 +608,7 @@ describe('guard suit (Ward)', () => {
 
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     const e1 = state.enemies.find((e) => e.instanceId === 'e1')!;
-    expect(e1.guard).toBe(1); // 1 hand card x 1 table ward card
+    expect(e1.guard).toBe(2); // 1 already on the table + 1 played = 2 on the table x 1 hand card
     expect(state.playerGuard).toBe(0);
   });
 });
@@ -644,7 +647,7 @@ describe('weaken suit (Hex)', () => {
       { type: 'PLAY_SET', suit: 'hex', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
     );
-    expect(next.enemies[0].statuses.weaken).toBe(2); // table set size 2 x 1 hand card
+    expect(next.enemies[0].statuses.weaken).toBe(3); // 2 already on the table + 1 played = 3 on the table x 1 hand card
     expect(next.enemies[0].hp).toBe(20); // no HP change
   });
 
@@ -698,13 +701,13 @@ describe('weaken suit (Hex)', () => {
         { id: 'ph2', kind: 'creature', suit: 'rot' },
       ],
     };
-    // raw magnitude = table 2 x hand 2 = 4, weakened by stacks x 10%
+    // raw magnitude = (2 already on the table + 2 played = 4 on the table) x 2 hand = 8, weakened by stacks x 10%
     let next = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
     );
-    const expectedMagnitude = Math.max(0, Math.round(4 * Math.max(0, 1 - stacks * 0.1)));
+    const expectedMagnitude = Math.max(0, Math.round(8 * Math.max(0, 1 - stacks * 0.1)));
     expect(next.enemies[0].hp).toBe(20 - expectedMagnitude);
     expect(next.playerStatuses.weaken).toBe(stacks); // turn hasn't ended yet -- no decay tick
 
@@ -730,13 +733,13 @@ describe('poison suit (Venom)', () => {
       { type: 'PLAY_SET', suit: 'venom', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
     );
-    expect(state.enemies[0].statuses.poison).toBe(2);
+    expect(state.enemies[0].statuses.poison).toBe(3); // 2 already on the table + 1 played = 3 on the table x 1 hand card
     expect(state.enemies[0].hp).toBe(20); // applying the stacks doesn't hit immediately
 
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    expect(next.enemies[0].hp).toBe(20 - 2); // its own poison tick, at the true end of its own turn
-    expect(next.enemies[0].statuses.poison).toBe(1);
+    expect(next.enemies[0].hp).toBe(20 - 3); // its own poison tick, at the true end of its own turn
+    expect(next.enemies[0].statuses.poison).toBe(2); // decays by 1
   });
 });
 
@@ -752,11 +755,12 @@ describe('strength suit (Vigor) and boon suit (Grace)', () => {
       playerHand: [{ id: 'ph1', kind: 'creature', suit: 'vigor' }],
     });
     let next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'vigor', handCardIds: ['ph1'] }, rng);
-    expect(next.playerStatuses.strength).toBe(2);
+    // 2 already on the table + 1 played = 3 on the table x 1 hand card
+    expect(next.playerStatuses.strength).toBe(3);
     expect(next.playerHP).toBe(30);
 
     next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng);
-    expect(next.playerStatuses.strength).toBe(1);
+    expect(next.playerStatuses.strength).toBe(2);
   });
 
   it('player Strength boosts a threat play by adding stacks to the table count before the hand-card multiplier', () => {
@@ -770,13 +774,13 @@ describe('strength suit (Vigor) and boon suit (Grace)', () => {
         { id: 'ph2', kind: 'creature', suit: 'wolf' },
       ],
     });
-    // (table set size 1 + 3 Strength) x 2 hand cards = 8
+    // (1 already on the table + 2 played = 3, +3 Strength = 6) x 2 hand cards = 12
     const next = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
     );
-    expect(next.enemies[0].hp).toBe(20 - 8);
+    expect(next.enemies[0].hp).toBe(20 - 12);
   });
 
   it('heals the player when played -- no target instance needed', () => {
@@ -790,7 +794,8 @@ describe('strength suit (Vigor) and boon suit (Grace)', () => {
       playerHand: [{ id: 'ph1', kind: 'creature', suit: 'grace' }],
     });
     const next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'grace', handCardIds: ['ph1'] }, rng);
-    expect(next.playerHP).toBe(22);
+    // 2 already on the table + 1 played = 3 on the table x 1 hand card = 3
+    expect(next.playerHP).toBe(23);
   });
 
   it('an enemy Strength buff boosts its own next attack, decaying by 1 per its own turn', () => {
@@ -816,10 +821,11 @@ describe('strength suit (Vigor) and boon suit (Grace)', () => {
     });
 
     // Plays both vigor cards (a play always commits every hand card of the
-    // chosen suit): 2 table x 2 hand = 4 Strength, then decays by 1 at this
-    // same turn's own end -> 3. 1 enemy -- this also concludes the round.
+    // chosen suit): 2 already on the table + 2 played = 4 on the table x 2
+    // hand = 8 Strength, then decays by 1 at this same turn's own end -> 7.
+    // 1 enemy -- this also concludes the round.
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    expect(state.enemies[0].statuses.strength).toBe(3);
+    expect(state.enemies[0].statuses.strength).toBe(7);
     expect(state.activeTurn).toBe('player');
 
     state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
@@ -832,9 +838,9 @@ describe('strength suit (Vigor) and boon suit (Grace)', () => {
       enemies: [{ ...state.enemies[0], hand: [{ id: 'e1w1', kind: 'creature', suit: 'wolf' }] }],
     };
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    // table wolf 1 x hand 1 = 1, boosted by 3 remaining Strength -> 4
-    expect(next.playerHP).toBe(30 - 4);
-    expect(next.enemies[0].statuses.strength).toBe(2); // decays again after this turn
+    // 1 already on the table + 1 played = 2 on the table, boosted by 7 remaining Strength -> 9, x hand 1 = 9
+    expect(next.playerHP).toBe(30 - 9);
+    expect(next.enemies[0].statuses.strength).toBe(6); // decays again after this turn
   });
 });
 

@@ -416,11 +416,6 @@ button {
   margin-bottom: 0.5rem;
 }
 
-.play-preview-banking {
-  color: #7fbf7f;
-  font-size: 0.85rem;
-}
-
 .play-controls-buttons {
   display: flex;
   gap: 0.5rem;

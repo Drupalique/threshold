@@ -29,7 +29,10 @@ export function PlayControls({
   onPlay,
   onPass,
 }: PlayControlsProps) {
-  const magnitude = tableSetSize * selectedCount;
+  // A played set is itself a multiplicative set on the table: this play's
+  // own cards count toward the total it multiplies against.
+  const tableSetSizeAfterPlay = tableSetSize + selectedCount;
+  const magnitude = tableSetSizeAfterPlay * selectedCount;
 
   return (
     <div className="play-controls">
@@ -40,15 +43,12 @@ export function PlayControls({
             <div className="play-controls-note">No plays left this turn -- pass to end it.</div>
           ) : needsTarget ? (
             <div className="play-controls-note">
-              Click an enemy above to target with {selectedSuitName} ({selectedCount} x {tableSetSize} ={' '}
+              Click an enemy above to target with {selectedSuitName} ({selectedCount} x {tableSetSizeAfterPlay} ={' '}
               {magnitude}).
             </div>
           ) : canPlay ? (
             <div className="play-preview">
-              Play {selectedSuitName}: {selectedCount} x {tableSetSize} = <strong>{magnitude}</strong>
-              {magnitude === 0 && (
-                <div className="play-preview-banking">Nothing to multiply yet -- banks these cards on the table for later.</div>
-              )}
+              Play {selectedSuitName}: {selectedCount} x {tableSetSizeAfterPlay} = <strong>{magnitude}</strong>
             </div>
           ) : (
             <div className="play-controls-note">

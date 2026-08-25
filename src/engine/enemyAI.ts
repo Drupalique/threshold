@@ -33,8 +33,9 @@ const suitCategory = (suit: SuitId): SuitCategory => SUIT_DEFINITIONS.find((s) =
  * search -- first-cut AI, not balance-tested.
  *
  * Strategy: score every suit the enemy holds >=1 hand card of by
- * (count-of-that-suit-in-hand x current-table-count-for-that-suit) x a
- * per-category weight, then weighted-pick among the scores (not argmax) so
+ * (count-of-that-suit-in-hand x (current-table-count-for-that-suit +
+ * count-of-that-suit-in-hand)) x a per-category weight, then weighted-pick
+ * among the scores (not argmax) so
  * enemies aren't 100% predictable turn to turn even on a fixed seed. A play
  * always commits ALL of the enemy's current hand cards of the chosen suit
  * (no subset optimization) -- there's no UI to drive a partial commit for an
@@ -44,8 +45,8 @@ const suitCategory = (suit: SuitId): SuitCategory => SUIT_DEFINITIONS.find((s) =
  * Low-HP self-preservation: below ENEMY_LOW_HP_HEAL_GUARD_THRESHOLD_PCT of
  * hpMax, boon/guard candidates get a further weight boost on top of their
  * base category weight, so a hurting enemy is meaningfully (not absolutely)
- * more likely to patch itself up than press an attack -- a 0-magnitude heal
- * (nothing on the table yet) can still lose out to a big available attack.
+ * more likely to patch itself up than press an attack -- a small heal off an
+ * otherwise-empty table can still lose out to a big available attack.
  */
 export function chooseEnemyPlay(enemy: EnemyInstance, table: TableCard[], rng: Rng): EnemyPlayChoice | null {
   const bySuit = new Map<SuitId, string[]>();
@@ -59,7 +60,7 @@ export function chooseEnemyPlay(enemy: EnemyInstance, table: TableCard[], rng: R
 
   const entries = Array.from(bySuit.entries()).map(([suit, handCardIds]) => {
     const category = suitCategory(suit);
-    const magnitude = handCardIds.length * countTableSetSize(table, suit);
+    const magnitude = handCardIds.length * (countTableSetSize(table, suit) + handCardIds.length);
     let weight = CATEGORY_WEIGHT[category] * (magnitude + 1);
     if (isLowHP && (category === 'boon' || category === 'guard')) weight *= LOW_HP_HEAL_GUARD_BOOST;
     return { weight, value: { suit, handCardIds } };
