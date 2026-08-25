@@ -2,19 +2,18 @@
 // against the real engine (combatEngine/runEngine) with no UI in between.
 // Built so a text-only agent (or a human at a terminal) can actually play
 // the game: each invocation loads state, applies exactly one player
-// decision, auto-resolves the resulting enemy phase (enemies have no real
-// choices to make -- see roomIntent.ts), and prints a full text picture of
-// the new state to decide the next move from.
+// decision, auto-resolves the resulting enemy phase, and prints a full text
+// picture of the new state to decide the next move from.
 //
 // Usage: npx tsx scripts/playtest.ts <command> [args...]
 // Run `npx tsx scripts/playtest.ts help` for the command list.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor } from '../src/engine/runEngine.ts';
 import { createRngFromState } from '../src/engine/rng.ts';
-import { getLegalPlayerClaimTargets, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
-import { currentIntent } from '../src/engine/roomIntent.ts';
+import { getLegalPlaySets, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
 import type { RunState } from '../src/types/run.ts';
+import type { TableCard } from '../src/types/combat.ts';
 import type { SuitId, SuitCategory } from '../src/types/suits.ts';
 
 const STATE_PATH = process.env.PLAYTEST_STATE ?? '.playtest-state.json';
@@ -50,9 +49,9 @@ function save(run: RunState, lastLogLength: number) {
 }
 
 // --- auto-play the parts that aren't real decisions --------------------
-// Enemies never choose anything (fixed, cycled patterns -- roomIntent.ts),
-// so there is nothing for an agent to weigh in on during the enemy phase.
-// Dispatch it to completion automatically after every player action, same
+// Enemies draw their own hand and choose their own plays (engine/enemyAI.ts)
+// -- there's nothing for an agent to weigh in on during the enemy phase, so
+// dispatch it to completion automatically after every player action, same
 // as CombatScreen's UI does on a timer.
 function runToNextDecision(run: RunState): RunState {
   let next = run;
@@ -73,9 +72,26 @@ function statusBagStr(bag: Record<string, number | undefined> | undefined): stri
   return parts.length ? ` [${parts.join(', ')}]` : '';
 }
 
-function intentStr(step: ReturnType<typeof currentIntent>): string {
-  if (step.type === 'corrupt') return `corrupt(${step.corruptEffect})`;
-  return `${step.type}${step.magnitude !== undefined ? ` ${step.magnitude}` : ''}`;
+// Table cards are owner-tagged (`'room'`, `'player'`, or an enemy's own
+// instanceId) -- room cards persist and accumulate across rounds until
+// someone plays into that suit, while a player's/enemy's own contribution
+// persists through the round and only wipes at the start of their own next
+// turn. Break the per-suit count down by owner so that's visible.
+function tableSummary(table: TableCard[]): string[] {
+  const bySuit = new Map<SuitId, TableCard[]>();
+  for (const card of table) {
+    if (!bySuit.has(card.suit)) bySuit.set(card.suit, []);
+    bySuit.get(card.suit)!.push(card);
+  }
+  if (bySuit.size === 0) return ['  (empty)'];
+  const lines: string[] = [];
+  for (const [suit, cards] of bySuit) {
+    const byOwner = new Map<string, number>();
+    for (const c of cards) byOwner.set(c.ownerId, (byOwner.get(c.ownerId) ?? 0) + 1);
+    const ownerStr = Array.from(byOwner.entries()).map(([owner, n]) => `${owner}:${n}`).join(', ');
+    lines.push(`  ${suit} (${suitCategory(suit)}) x${cards.length} [${ownerStr}]`);
+  }
+  return lines;
 }
 
 function render(run: RunState, lastLogLength: number) {
@@ -92,42 +108,31 @@ function render(run: RunState, lastLogLength: number) {
     lines.push('Enemies:');
     if (c.enemies.length === 0) lines.push('  (none)');
     for (const e of c.enemies) {
-      lines.push(`  [${e.instanceId}] ${e.name} HP ${e.hp}/${e.hpMax} Guard ${e.guard}${statusBagStr(e.statuses)} -- next intent: ${intentStr(currentIntent(e))}`);
+      const hand = e.hand.map((card) => card.suit).join(',') || 'no cards';
+      lines.push(`  [${e.instanceId}] ${e.name} HP ${e.hp}/${e.hpMax} Guard ${e.guard}${statusBagStr(e.statuses)} -- hand: ${hand}`);
     }
 
     lines.push('');
-    lines.push(`Pool (threat suits this room: ${c.roomParams.threatSuits.join(', ')}):`);
-    const counts = new Map<SuitId, number>();
-    for (const card of c.pool) {
-      if (card.kind !== 'creature') continue;
-      counts.set(card.suit, (counts.get(card.suit) ?? 0) + 1);
-    }
-    if (counts.size === 0) lines.push('  (empty)');
-    for (const [suit, count] of counts) {
-      const blocked = c.blockedSuits[suit] ?? 0;
-      const decay = c.decayCounters[suit] ?? 0;
-      lines.push(
-        `  ${suit} (${suitCategory(suit)}) x${count}${decay > 0 ? ` decay ${decay}/3` : ''}${blocked > 0 ? ` BLOCKED ${blocked} more turn(s)` : ''}`,
-      );
-    }
+    lines.push(`Table (threat suits this room: ${c.roomParams.threatSuits.join(', ')}):`);
+    lines.push(...tableSummary(c.table));
 
     lines.push('');
     lines.push(`Your hand (draw pile ${c.drawPile.length}, discard pile ${c.discardPile.length}):`);
     if (c.playerHand.length === 0) lines.push('  (empty)');
     for (const card of c.playerHand) {
-      if (card.kind === 'quake') lines.push(`  [${card.id}] QUAKE -- play for unlimited claims this turn`);
+      if (card.kind === 'quake') lines.push(`  [${card.id}] QUAKE -- play for unlimited plays this turn`);
       else lines.push(`  [${card.id}] ${card.suit} (${suitCategory(card.suit)})`);
     }
 
     if (c.activeTurn === 'player' && c.status === 'active') {
       lines.push('');
-      lines.push('Legal claims (suit / poolSetSize / target if any / your matching hand card ids):');
-      const targets = getLegalPlayerClaimTargets(c);
+      lines.push('Legal plays (suit / table set size / target if any / your matching hand card ids):');
+      const targets = getLegalPlaySets(c);
       if (targets.length === 0) lines.push('  (none -- no plays left or nothing matches your hand)');
       for (const t of targets) {
         const matchingIds = c.playerHand.filter((card) => card.kind === 'creature' && card.suit === t.suit).map((card) => card.id);
         const targetName = t.targetInstanceId ? c.enemies.find((e) => e.instanceId === t.targetInstanceId)?.name : '';
-        lines.push(`  ${t.suit} x${t.poolSetSize}${t.targetInstanceId ? ` -> ${targetName} [${t.targetInstanceId}]` : ''} : hand ${matchingIds.join(',')}`);
+        lines.push(`  ${t.suit} x${t.tableSetSize}${t.targetInstanceId ? ` -> ${targetName} [${t.targetInstanceId}]` : ''} : hand ${matchingIds.join(',')}`);
       }
     }
 
@@ -142,7 +147,7 @@ function render(run: RunState, lastLogLength: number) {
     lines.push('');
     lines.push(`Choose a reward card (deck size ${run.deck.length}):`);
     run.rewardOptions.forEach((card, i) => {
-      const desc = card.kind === 'quake' ? 'QUAKE -- unlimited claims for a turn' : `${card.suit} (${suitCategory(card.suit)})`;
+      const desc = card.kind === 'quake' ? 'QUAKE -- unlimited plays for a turn' : `${card.suit} (${suitCategory(card.suit)})`;
       lines.push(`  [${i}] [${card.id}] ${desc}`);
     });
   }
@@ -151,7 +156,7 @@ function render(run: RunState, lastLogLength: number) {
     lines.push('');
     lines.push('Choose a door:');
     for (const d of run.currentDoors) {
-      lines.push(`  [${d.id}] size=${d.tags.size} color=${d.tags.color} texture=${d.tags.texture}`);
+      lines.push(`  [${d.id}] size=${d.tags.size} color=${d.tags.color}`);
     }
   }
 
@@ -185,10 +190,10 @@ switch (cmd) {
     break;
   }
 
-  case 'claim': {
+  case 'play': {
     const [suit, cardIdsRaw, target] = args;
     if (!suit || !cardIdsRaw) {
-      console.log('Usage: claim <suit> <cardId1,cardId2,...> [targetInstanceId]');
+      console.log('Usage: play <suit> <cardId1,cardId2,...> [targetInstanceId]');
       process.exit(1);
     }
     const { run } = load();
@@ -197,28 +202,10 @@ switch (cmd) {
       process.exit(1);
     }
     let next = applyCombatAction(run, {
-      type: 'PLAYER_CLAIM',
+      type: 'PLAY_SET',
       suit: suit as SuitId,
       handCardIds: cardIdsRaw.split(','),
       targetInstanceId: target,
-    });
-    next = runToNextDecision(next);
-    save(next, newLogLength(next));
-    render(next, 0);
-    break;
-  }
-
-  case 'feed': {
-    const [suit, cardIdsRaw] = args;
-    if (!suit || !cardIdsRaw) {
-      console.log('Usage: feed <suit> <cardId1,cardId2,...>');
-      process.exit(1);
-    }
-    const { run } = load();
-    let next = applyCombatAction(run, {
-      type: 'PLAYER_FEED',
-      suit: suit as SuitId,
-      handCardIds: cardIdsRaw.split(','),
     });
     next = runToNextDecision(next);
     save(next, newLogLength(next));
@@ -291,16 +278,15 @@ switch (cmd) {
 Commands:
   new [seed]                              start a fresh run (default: random seed)
   state                                   reprint the current state
-  claim <suit> <id,id,...> [targetId]     claim a pool set with these hand cards
-  feed <suit> <id,id,...>                 play matching hand cards face-up into the pool instead of claiming
-  pass                                    end your turn without claiming
-  quake <cardId>                          play a Quake card (unlimited claims this turn)
+  play <suit> <id,id,...> [targetId]      play matching hand cards onto the table (multiplies against what's already there)
+  pass                                    end your turn without playing
+  quake <cardId>                          play a Quake card (unlimited plays this turn)
   reward <cardIndex>                      pick a reward card (0-2) after clearing a room, before the door choice
   door <doorId>                           pick a door after clearing a room
   help                                    this message
 
-The enemy phase auto-resolves after every player action (enemies just follow
-a fixed pattern -- see the "next intent" shown per enemy, no real choice
-there), so every command lands you back at your next real decision point.`);
+The enemy phase auto-resolves after every player action (each enemy draws
+its own hand and picks its own play -- see the "hand" shown per enemy above),
+so every command lands you back at your next real decision point.`);
   }
 }

@@ -27,11 +27,11 @@ import {
 let roomCounter = 0;
 
 /**
- * How many enemies this room gets, weighted by floor (PLAYTEST_FINDINGS.md
- * Finding 1 -- previously a flat uniform roll across ROOM_MIN/MAX_ENEMIES
- * regardless of depth). Linearly blends ENEMY_COUNT_WEIGHTS_EARLY (floor 1)
- * toward ENEMY_COUNT_WEIGHTS_LATE (floor RUN_MAX_DEPTH) so 3-enemy rooms --
- * the room shape 64% of all deaths happened in, at a 10% clear rate -- are
+ * How many enemies this room gets, weighted by floor -- previously a flat
+ * uniform roll across ROOM_MIN/MAX_ENEMIES regardless of depth, which batch
+ * playtesting found made 3-enemy rooms (a ~10% clear rate) exactly as likely
+ * on floor 1 as floor 9. Linearly blends ENEMY_COUNT_WEIGHTS_EARLY (floor 1)
+ * toward ENEMY_COUNT_WEIGHTS_LATE (floor RUN_MAX_DEPTH) so 3-enemy rooms are
  * rare early and common late, instead of equally likely everywhere.
  */
 function pickEnemyCount(floor: number, rng: Rng): number {

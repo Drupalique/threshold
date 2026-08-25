@@ -1,25 +1,25 @@
 // Batch playtest simulator: plays full runs against the real engine and
-// instruments the outcomes, so questions about tension/pacing/decay/multi-
-// enemy dynamics can be answered with distributions across many seeds
-// instead of a single hand-played room. No UI, no mocking -- same
-// runEngine/combatEngine calls the interactive scripts/playtest.ts CLI uses.
+// instruments the outcomes, so questions about tension/pacing/multi-enemy
+// dynamics can be answered with distributions across many seeds instead of
+// a single hand-played room. No UI, no mocking -- same runEngine/combatEngine
+// calls the interactive scripts/playtest.ts CLI uses.
 //
 // Two player-turn decision-makers are available, via PLAYTEST_BOT:
-//   heuristic (default) -- see pickBestClaim below, a scored greedy bot.
-//   llm                 -- combat claim/pass decisions go through Claude
+//   heuristic (default) -- see pickBestPlay below, a scored greedy bot.
+//   llm                 -- combat play/pass decisions go through Claude
 //                           (see llmBot.ts) via a cheap model. Reward and
 //                           door choices stay on the heuristic pickers
 //                           below regardless of PLAYTEST_BOT -- this only
-//                           swaps out per-turn claim/pass decisions.
+//                           swaps out per-turn play/pass decisions.
 // Requires ANTHROPIC_API_KEY when PLAYTEST_BOT=llm. Start small -- each run
 // is one real API call per player decision, sequential, not batched.
 //
 // Usage: npx tsx scripts/playtest-sim.ts [numRuns] [startSeed]
 //        PLAYTEST_BOT=llm npx tsx scripts/playtest-sim.ts 1 1
 import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor } from '../src/engine/runEngine.ts';
-import { getLegalPlayerClaimTargets, getFeedableSuits, type LegalClaimTarget } from '../src/engine/combatEngine.ts';
-import { SUIT_DEFINITIONS, DECAY_TURNS_N } from '../src/config/constants.ts';
-import { pickLlmClaim, llmStats, type LlmChosenAction } from './llmBot.ts';
+import { getLegalPlaySets, type LegalPlayTarget } from '../src/engine/combatEngine.ts';
+import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
+import { pickLlmPlay, llmStats, type LlmChosenPlay } from './llmBot.ts';
 import type { RunState } from '../src/types/run.ts';
 import type { CombatState } from '../src/types/combat.ts';
 import type { SuitId, SuitCategory } from '../src/types/suits.ts';
@@ -31,7 +31,6 @@ if (BOT_MODE === 'llm' && !process.env.ANTHROPIC_API_KEY) {
 }
 
 const suitCategory = (id: SuitId): SuitCategory => SUIT_DEFINITIONS.find((s) => s.id === id)!.category;
-const suitByName = (name: string) => SUIT_DEFINITIONS.find((s) => s.name.toLowerCase() === name.toLowerCase());
 
 // --- metrics ---------------------------------------------------------------
 
@@ -41,25 +40,15 @@ interface Metrics {
   losses: number;
   anomalies: number;
   depthReached: number[];
-  turnsPerRun: number[];
   deathCauses: Record<string, number>;
   deathEnemyCounts: number[];
   deathDepths: number[];
-  decayEvents: { category: SuitCategory; enemiesPresent: number }[];
-  claimMagnitudes: Record<SuitCategory, number[]>;
+  playMagnitudes: Record<SuitCategory, number[]>;
   deadHandTurns: number;
   voluntaryPassTurns: number;
   totalPlayerTurns: number;
   unclaimedCardsPerTurn: number[];
-  guardWasted: number[];
   guardBanked: number[];
-  // Feeding is only ever offered to the LLM bot (see playPlayerTurn) -- the
-  // heuristic bot has no feed heuristic, so these stay empty in
-  // PLAYTEST_BOT=heuristic runs.
-  feedActions: number;
-  feedCardsPerAction: number[];
-  lockstepChecks: number;
-  lockstepViolations: number;
   enemyCountAtRoomStart: number[];
   roomsClearedPerRun: number[];
   hpLossPerRoomCleared: number[];
@@ -73,22 +62,15 @@ function freshMetrics(): Metrics {
     losses: 0,
     anomalies: 0,
     depthReached: [],
-    turnsPerRun: [],
     deathCauses: {},
     deathEnemyCounts: [],
     deathDepths: [],
-    decayEvents: [],
-    claimMagnitudes: { threat: [], boon: [], guard: [], weaken: [], poison: [], strength: [] },
+    playMagnitudes: { threat: [], boon: [], guard: [], weaken: [], poison: [], strength: [] },
     deadHandTurns: 0,
     voluntaryPassTurns: 0,
     totalPlayerTurns: 0,
     unclaimedCardsPerTurn: [],
-    guardWasted: [],
     guardBanked: [],
-    feedActions: 0,
-    feedCardsPerAction: [],
-    lockstepChecks: 0,
-    lockstepViolations: 0,
     enemyCountAtRoomStart: [],
     roomsClearedPerRun: [],
     hpLossPerRoomCleared: [],
@@ -99,30 +81,27 @@ function freshMetrics(): Metrics {
 const m = freshMetrics();
 
 // --- bot policy --------------------------------------------------------
-// Deliberately a "greedy, always claim when profitable, never bait decay"
-// baseline representing a reasonably attentive player -- NOT an optimal
-// solver. It never deliberately leaves a pile to decay for the untargeted
-// group-effect payoff (that's a real strategic option the design doc raises
-// but modeling optimal decay-timing is a separate, harder question); every
-// decay this bot triggers is decay-from-inability-to-act, not decay-by-choice.
-// See PLAYTEST_FINDINGS.md for how that caveat bears on the decay numbers.
+// Deliberately a "greedy, always play when profitable" baseline representing
+// a reasonably attentive player -- NOT an optimal solver. There's no decay
+// to bait or avoid any more (an unclaimed table pile just sits there), so
+// this bot's only real choices are which suit to play and who to target.
 
-interface ScoredClaim {
+interface ScoredPlay {
   suit: SuitId;
   targetInstanceId?: string;
   handCardIds: string[];
   score: number;
 }
 
-// 'aggro' always claims the biggest matched damage/effect it can, defensive
+// 'aggro' always plays the biggest matched damage/effect it can, defensive
 // tools only when clearly needed. 'defensive' weighs Guard/heal far higher
-// and much earlier (as a robustness check on the lethality findings below --
-// see PLAYTEST_FINDINGS.md -- to rule out "the bot just doesn't defend" as
-// the explanation for a low survival rate before blaming the game's balance).
+// and much earlier (a robustness check on the lethality findings -- rules
+// out "the bot just doesn't defend" as the explanation for a low survival
+// rate before blaming the game's balance).
 const PROFILE = (process.env.PLAYTEST_PROFILE ?? 'aggro') as 'aggro' | 'defensive';
 
-function pickBestClaim(state: CombatState, targets: LegalClaimTarget[]): ScoredClaim | null {
-  const bySuit = new Map<SuitId, LegalClaimTarget[]>();
+function pickBestPlay(state: CombatState, targets: LegalPlayTarget[]): ScoredPlay | null {
+  const bySuit = new Map<SuitId, LegalPlayTarget[]>();
   for (const t of targets) {
     if (!bySuit.has(t.suit)) bySuit.set(t.suit, []);
     bySuit.get(t.suit)!.push(t);
@@ -130,14 +109,17 @@ function pickBestClaim(state: CombatState, targets: LegalClaimTarget[]): ScoredC
 
   const hpRatio = state.playerHP / state.playerHPMax;
   const enemyCount = state.enemies.length;
-  let best: ScoredClaim | null = null;
+  let best: ScoredPlay | null = null;
 
   for (const [suit, suitTargets] of bySuit) {
     const category = suitCategory(suit);
     const handCardIds = state.playerHand.filter((c) => c.kind === 'creature' && c.suit === suit).map((c) => c.id);
     const handCount = handCardIds.length;
-    const poolSetSize = suitTargets[0].poolSetSize;
-    const rawMagnitude = poolSetSize * handCount;
+    const tableSetSize = suitTargets[0].tableSetSize;
+    // A play joins the table set it multiplies against -- see GAME_DESIGN.md
+    // §2 -- so the effective total is what's already there plus this play's
+    // own cards, not just what's already there.
+    const rawMagnitude = handCount * (tableSetSize + handCount);
 
     if (category === 'threat' || category === 'weaken' || category === 'poison') {
       // Focus-fire: prefer a kill (least overkill) among alive enemies this
@@ -151,7 +133,7 @@ function pickBestClaim(state: CombatState, targets: LegalClaimTarget[]): ScoredC
           score = lethal ? 1000 - enemy.hp : rawMagnitude + (100 - enemy.hp) * 0.05;
         } else {
           // Hex/Venom: no immediate payoff, so weight below a direct-damage
-          // claim of the same magnitude, and prefer the highest-HP target
+          // play of the same magnitude, and prefer the highest-HP target
           // (spreads pressure onto whoever will survive longest to feel it).
           score = rawMagnitude * 0.6 + enemy.hp * 0.02;
         }
@@ -169,7 +151,7 @@ function pickBestClaim(state: CombatState, targets: LegalClaimTarget[]): ScoredC
       const score = rawMagnitude * need * (PROFILE === 'defensive' ? 2.5 : 1);
       if (!best || score > best.score) best = { suit, handCardIds, score };
     } else {
-      // strength (Vigor): modest baseline value, discounted for decay risk.
+      // strength (Vigor): modest baseline value.
       const score = rawMagnitude * 0.5;
       if (!best || score > best.score) best = { suit, handCardIds, score };
     }
@@ -178,13 +160,12 @@ function pickBestClaim(state: CombatState, targets: LegalClaimTarget[]): ScoredC
   return best;
 }
 
-// Reward-pick heuristic (PERSISTENT_DECK_PLAN.md Phase 5): prefer whichever
-// offered suit already has the most live copies in run.deck -- a simple
-// "double down on what you've built" consistency bias, not a solver. Doors
-// don't signal reward suits yet (that wiring is a follow-up per the plan),
-// so this is the only signal available. Quake scores as an average suit's
-// worth, since it's neither clearly better nor worse than another copy of
-// whatever's already well-represented.
+// Reward-pick heuristic: prefer whichever offered suit already has the most
+// live copies in run.deck -- a simple "double down on what you've built"
+// consistency bias, not a solver. Doors don't signal reward suits, so this
+// is the only signal available. Quake scores as an average suit's worth,
+// since it's neither clearly better nor worse than another copy of whatever
+// suit is already well-represented.
 function pickReward(run: RunState): string {
   const options = run.rewardOptions!;
   const suitCounts = new Map<SuitId, number>();
@@ -212,9 +193,7 @@ function pickDoor(run: RunState): string {
   let bestId = doors[0].id;
   let bestScore = -Infinity;
   for (const d of doors) {
-    let score = 0;
-    score += d.tags.size === 'small' ? (hpRatio < 0.5 ? 2 : 0.5) : (hpRatio < 0.5 ? -1 : 1);
-    score += d.tags.texture === 'jagged' ? -0.5 : 0.3;
+    const score = d.tags.size === 'small' ? (hpRatio < 0.5 ? 2 : 0.5) : (hpRatio < 0.5 ? -1 : 1);
     if (score > bestScore) {
       bestScore = score;
       bestId = d.id;
@@ -223,35 +202,11 @@ function pickDoor(run: RunState): string {
   return bestId;
 }
 
-// --- decay/guard-fade log instrumentation -------------------------------
+// --- guard-banked log instrumentation -----------------------------------
 
-function recordDecayAndGuardFade(prevCombat: CombatState, nextCombat: CombatState) {
-  const newEntries = nextCombat.log.slice(prevCombat.log.length);
-  for (const entry of newEntries) {
-    if (entry.type === 'decay') {
-      const match = entry.message.match(/^The (.+?) pile \((\d+)\) decays/);
-      if (match) {
-        const suit = suitByName(match[1]);
-        if (suit) m.decayEvents.push({ category: suit.category, enemiesPresent: prevCombat.enemies.length });
-      }
-    }
-    if (entry.type === 'guard-fade') {
-      if (prevCombat.playerGuard > 0) m.guardWasted.push(prevCombat.playerGuard);
-    }
-  }
-}
-
-function checkLockstep(combat: CombatState) {
-  const byDef = new Map<string, number[]>();
-  for (const e of combat.enemies) {
-    if (!byDef.has(e.defId)) byDef.set(e.defId, []);
-    byDef.get(e.defId)!.push(e.patternIndex);
-  }
-  for (const indices of byDef.values()) {
-    if (indices.length < 2) continue;
-    m.lockstepChecks++;
-    if (new Set(indices).size > 1) m.lockstepViolations++;
-  }
+function recordGuardBanked(prevCombat: CombatState, nextCombat: CombatState) {
+  const bankedThisTick = nextCombat.playerGuard - prevCombat.playerGuard;
+  if (bankedThisTick > 0) m.guardBanked.push(bankedThisTick);
 }
 
 // --- turn/room/run drivers -----------------------------------------------
@@ -263,17 +218,8 @@ function checkLockstep(combat: CombatState) {
 function runEnemyPhaseToNextDecision(run: RunState): RunState {
   let next = run;
   while (next.phase === 'combat' && next.combat?.status === 'active' && next.combat.activeTurn === 'enemy') {
-    const prevCombat = next.combat;
     next = applyCombatAction(next, { type: 'ENEMY_TURN' });
-    if (next.combat) recordDecayAndGuardFade(prevCombat, next.combat);
   }
-  // Checked once per full round, not per individual enemy sub-action: mid-
-  // round, enemies are *expected* to be transiently offset from each other
-  // as they act one at a time in sequence -- that's not a desync, just
-  // sequencing. Also skip a round truncated by player death (status !==
-  // 'active') -- combat ending before the last enemy acted isn't a pattern
-  // desync either, just the fight being over.
-  if (next.combat && next.combat.status === 'active') checkLockstep(next.combat);
   return next;
 }
 
@@ -288,22 +234,15 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
     const state = next.combat;
     // Quake is auto-played the moment it's in hand regardless of bot mode --
     // it never expires within the turn and only ever adds plays, so there's
-    // no decision here for either bot to make (see PERSISTENT_DECK_PLAN.md
-    // discussion of the card).
+    // no decision here for either bot to make.
     const quakeCard = state.playerHand.find((c) => c.kind === 'quake');
     if (quakeCard) {
       next = applyCombatAction(next, { type: 'PLAYER_PLAY_QUAKE', cardId: quakeCard.id });
       continue;
     }
 
-    const targets = getLegalPlayerClaimTargets(state);
-    // Feeding is only offered to the LLM bot -- the heuristic bot
-    // (pickBestClaim) has no feed heuristic, so leaving this empty for
-    // BOT_MODE === 'heuristic' keeps its behavior byte-for-byte identical
-    // to before feed existed (see PLAYTEST_FINDINGS.md's batch numbers,
-    // all of which predate this mechanic).
-    const feedableSuits = BOT_MODE === 'llm' ? getFeedableSuits(state) : [];
-    if (targets.length === 0 && feedableSuits.length === 0) {
+    const targets = getLegalPlaySets(state);
+    if (targets.length === 0) {
       m.deadHandTurns++;
       m.totalPlayerTurns++;
       m.unclaimedCardsPerTurn.push(state.playerHand.length);
@@ -311,13 +250,13 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
       break;
     }
 
-    const chosen: LlmChosenAction | null =
+    const chosen: LlmChosenPlay | null =
       BOT_MODE === 'llm'
-        ? await pickLlmClaim(state, targets, feedableSuits)
+        ? await pickLlmPlay(state, targets)
         : (() => {
-            const best = pickBestClaim(state, targets);
+            const best = pickBestPlay(state, targets);
             return best && best.score > 0
-              ? { kind: 'claim' as const, suit: best.suit, targetInstanceId: best.targetInstanceId, handCardIds: best.handCardIds }
+              ? { suit: best.suit, targetInstanceId: best.targetInstanceId, handCardIds: best.handCardIds }
               : null;
           })();
 
@@ -327,24 +266,6 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
       m.unclaimedCardsPerTurn.push(state.playerHand.length);
       next = applyCombatAction(next, { type: 'PLAYER_PASS' });
       break;
-    }
-
-    if (chosen.kind === 'feed') {
-      m.feedActions++;
-      m.feedCardsPerAction.push(chosen.handCardIds.length);
-      next = applyCombatAction(next, { type: 'PLAYER_FEED', suit: chosen.suit, handCardIds: chosen.handCardIds });
-      const after = next.combat!;
-      if (!after.unlimitedPlaysThisTurn && after.playsRemaining <= 0) {
-        m.totalPlayerTurns++;
-        m.unclaimedCardsPerTurn.push(after.activeTurn === 'player' ? 0 : after.playerHand.length);
-        break;
-      }
-      if (after.status !== 'active' || after.activeTurn !== 'player') {
-        m.totalPlayerTurns++;
-        m.unclaimedCardsPerTurn.push(after.playerHand.length);
-        break;
-      }
-      continue;
     }
 
     const category = suitCategory(chosen.suit);
@@ -358,7 +279,7 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
     };
 
     next = applyCombatAction(next, {
-      type: 'PLAYER_CLAIM',
+      type: 'PLAY_SET',
       suit: chosen.suit,
       targetInstanceId: chosen.targetInstanceId,
       handCardIds: chosen.handCardIds,
@@ -368,17 +289,17 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
 
     if (category === 'threat') {
       const dealt = before.enemyHp! - (afterEnemy?.hp ?? 0);
-      m.claimMagnitudes.threat.push(dealt);
+      m.playMagnitudes.threat.push(dealt);
     } else if (category === 'boon') {
-      m.claimMagnitudes.boon.push(after.playerHP - before.playerHP);
+      m.playMagnitudes.boon.push(after.playerHP - before.playerHP);
     } else if (category === 'guard') {
       m.guardBanked.push(after.playerGuard - before.playerGuard);
-      m.claimMagnitudes.guard.push(after.playerGuard - before.playerGuard);
+      m.playMagnitudes.guard.push(after.playerGuard - before.playerGuard);
     } else if (category === 'weaken' || category === 'poison') {
       const afterStack = afterEnemy ? (afterEnemy.statuses[category] ?? 0) : 0;
-      m.claimMagnitudes[category].push(afterStack - (before.enemyStack ?? 0));
+      m.playMagnitudes[category].push(afterStack - (before.enemyStack ?? 0));
     } else {
-      m.claimMagnitudes.strength.push((after.playerStatuses.strength ?? 0) - before.playerStrength);
+      m.playMagnitudes.strength.push((after.playerStatuses.strength ?? 0) - before.playerStrength);
     }
 
     if (!after.unlimitedPlaysThisTurn && after.playsRemaining <= 0) {
@@ -437,7 +358,9 @@ async function playRun(seed: number): Promise<void> {
       }
       run = await playPlayerTurn(run);
       if (run.phase !== 'combat' || run.combat!.status !== 'active') break;
+      const prevCombat = run.combat!;
       run = runEnemyPhaseToNextDecision(run);
+      if (run.combat) recordGuardBanked(prevCombat, run.combat);
     }
 
     if (run.phase === 'combat' && run.combat!.status === 'player-dead') {
@@ -491,7 +414,7 @@ for (let i = 0; i < numRuns; i++) {
 }
 
 const report = {
-  config: { numRuns, startSeed, DECAY_TURNS_N, botMode: BOT_MODE, ...(BOT_MODE === 'llm' ? { llm: llmStats() } : {}) },
+  config: { numRuns, startSeed, botMode: BOT_MODE, ...(BOT_MODE === 'llm' ? { llm: llmStats() } : {}) },
   outcomes: { runs: m.runs, wins: m.wins, losses: m.losses, anomalies: m.anomalies, winRate: Number((m.wins / m.runs).toFixed(3)) },
   depthReached: stats(m.depthReached),
   roomsClearedPerRun: stats(m.roomsClearedPerRun),
@@ -508,38 +431,15 @@ const report = {
     voluntaryPassRate: Number((m.voluntaryPassTurns / m.totalPlayerTurns).toFixed(3)),
   },
   unclaimedCardsPerTurn: stats(m.unclaimedCardsPerTurn),
-  claimMagnitudes: Object.fromEntries(Object.entries(m.claimMagnitudes).map(([k, v]) => [k, { count: v.length, ...stats(v) }])),
+  playMagnitudes: Object.fromEntries(Object.entries(m.playMagnitudes).map(([k, v]) => [k, { count: v.length, ...stats(v) }])),
   bigThreatSpikes: {
-    total: m.claimMagnitudes.threat.length,
-    ge8: m.claimMagnitudes.threat.filter((x) => x >= 8).length,
-    ge12: m.claimMagnitudes.threat.filter((x) => x >= 12).length,
-    ge16: m.claimMagnitudes.threat.filter((x) => x >= 16).length,
-  },
-  decayEvents: {
-    total: m.decayEvents.length,
-    byCategory: Object.fromEntries(
-      Object.entries(
-        m.decayEvents.reduce((acc, e) => {
-          acc[e.category] = (acc[e.category] ?? 0) + 1;
-          return acc;
-        }, {} as Record<string, number>),
-      ),
-    ),
-    avgEnemiesPresent: stats(m.decayEvents.map((e) => e.enemiesPresent)),
+    total: m.playMagnitudes.threat.length,
+    ge8: m.playMagnitudes.threat.filter((x) => x >= 8).length,
+    ge12: m.playMagnitudes.threat.filter((x) => x >= 12).length,
+    ge16: m.playMagnitudes.threat.filter((x) => x >= 16).length,
   },
   guard: {
     banked: stats(m.guardBanked),
-    wastedOnFade: stats(m.guardWasted),
-    fadeEvents: m.guardWasted.length,
-  },
-  feed: {
-    actions: m.feedActions,
-    cardsPerAction: stats(m.feedCardsPerAction),
-  },
-  lockstep: {
-    checksAcrossMultiEnemyGroups: m.lockstepChecks,
-    violations: m.lockstepViolations,
-    violationRate: m.lockstepChecks ? Number((m.lockstepViolations / m.lockstepChecks).toFixed(4)) : null,
   },
   roomClearRateByEnemyCount: Object.fromEntries(
     Object.entries(m.roomOutcomesByEnemyCount).map(([count, o]) => [

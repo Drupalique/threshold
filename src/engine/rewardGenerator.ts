@@ -21,11 +21,10 @@ const REWARD_SUITS: SuitId[] = [...THREAT_SUITS, BOON_SUIT, GUARD_SUIT, WEAKEN_S
 type RewardCategory = 'suit' | 'quake';
 
 /**
- * MVP reward shape (PERSISTENT_DECK_PLAN.md Phase 2 / open question 2): a
- * uniform pick across every non-Quake suit per slot, Quake folded in at a
- * low weight instead of its old hand-only mint chance -- no removal/upgrade
- * options yet. `depth` only feeds the returned ids' uniqueness, not the
- * odds; every slot draws from the same full suit pool regardless of depth.
+ * MVP reward shape: a uniform pick across every non-Quake suit per slot,
+ * Quake folded in at a low weight -- no removal/upgrade options yet. `depth`
+ * only feeds the returned ids' uniqueness, not the odds; every slot draws
+ * from the same full suit pool regardless of depth.
  */
 export function generateRewardOptions(depth: number, rng: Rng): Card[] {
   const options: Card[] = [];

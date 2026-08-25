@@ -108,9 +108,9 @@ export const THREAT_SUIT_COUNT_BY_SIZE_BAND: Record<PoolSizeBand, number> = {
 export const ROOM_MIN_ENEMIES = 1;
 export const ROOM_MAX_ENEMIES = 3;
 
-// Enemy count is the single largest lever on room lethality
-// (PLAYTEST_FINDINGS.md Finding 1: 1-enemy rooms cleared at 91% vs. 10% for
-// 3-enemy, identical across every bot profile tested) and used to be rolled
+// Enemy count is the single largest lever on room lethality (batch
+// playtesting found 1-enemy rooms cleared at ~91% vs. ~10% for 3-enemy,
+// identical across every bot profile tested) and used to be rolled
 // uniformly across ROOM_MIN_ENEMIES..ROOM_MAX_ENEMIES regardless of floor --
 // a 3-pack was exactly as likely on room 1 as room 9. These are the two
 // interpolation endpoints roomGenerator's pickEnemyCount blends between
@@ -188,11 +188,10 @@ export const DOOR_CORRELATION_RATE = 0.75;
 
 export const RUN_MAX_DEPTH = 10;
 
-// The run's starting deck (PERSISTENT_DECK_PLAN.md open question 5's
-// strawman) -- 19 cards, weighted toward the four threat suits with a light
-// scattering of every support suit so an early room almost always has
-// *something* live to claim. A balance surface like every ratio constant
-// above; expect to retune after Phase 5 batch-sim data, not before.
+// The run's starting deck -- 19 cards, weighted toward the four threat
+// suits with a light scattering of every support suit so an early room
+// almost always has *something* live to play. A balance surface like every
+// ratio constant above; expect to retune with fresh playtesting data.
 export const STARTER_DECK: CreatureCard[] = [
   ...cardCopies('wolf', 3, 'starter'),
   ...cardCopies('ember', 3, 'starter'),
@@ -208,11 +207,9 @@ export const STARTER_DECK: CreatureCard[] = [
 // --- Rewards ------------------------------------------------------------
 
 // Odds a reward offer's slot is a Quake card instead of an ordinary suited
-// one (PERSISTENT_DECK_PLAN.md open question 3: Quake moved out of hand
-// generation entirely and lives here now) -- deliberately rarer than an
-// ordinary suit pick, since unlimited plays for a turn is the single
-// strongest thing a card can do, and it's now a permanent deck addition
-// rather than a one-turn-only mint.
+// one -- deliberately rarer than an ordinary suit pick, since unlimited
+// plays for a turn is the single strongest thing a card can do, and it's a
+// permanent deck addition rather than a one-turn-only mint.
 export const QUAKE_REWARD_RATIO = 0.08;
 
 export const REWARD_OPTION_COUNT = 3;
