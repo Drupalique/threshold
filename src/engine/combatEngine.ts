@@ -14,6 +14,7 @@ import { shuffleDeck, drawCards, topUpHand } from './deckState';
 import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTableForRound } from './tableState';
 import { chooseEnemyPlay } from './enemyAI';
 import { enemyDefById } from '../config/enemies';
+import { specialCardById } from '../config/specialCards';
 import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken } from './statusEffects';
 import { STATUS_DEFS } from '../types/status';
 import {
@@ -371,6 +372,80 @@ function performPlay(
       ),
     ],
   };
+
+  next = applyRiders(next, actor, targetInstanceId, playedCards);
+
+  return next;
+}
+
+/**
+ * Fires every specific card's rider effect for cards that were part of this
+ * play (see types/specialCards.ts) -- runs after the suit's own category
+ * effect (and its log line) has fully resolved, and never touches the
+ * magnitude formula above. A play with several specific cards fires all of
+ * their riders independently; a plain suit copy with no specialId
+ * contributes nothing here. bonus-damage reuses the same target the category
+ * effect already resolved against -- only ever paired with threat/weaken/
+ * poison suits, so targetInstanceId is guaranteed set for a player actor by
+ * isLegalPlay's own requiresEnemyTarget check.
+ */
+function applyRiders(
+  state: CombatState,
+  actor: Actor,
+  targetInstanceId: string | undefined,
+  playedCards: CreatureCard[],
+): CombatState {
+  let next = state;
+  const actorName = actorNameOf(state, actor);
+
+  for (const card of playedCards) {
+    if (!card.specialId) continue;
+    const def = specialCardById(card.specialId);
+    const rider = def.rider;
+
+    if (rider.kind === 'bonus-damage') {
+      if (actor.kind === 'player') {
+        // The target may already have been defeated by this same play's own
+        // category effect -- nothing left to hit.
+        const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
+        if (!enemy) continue;
+        const result = absorbDamage(enemy.hp, enemy.guard, rider.amount);
+        const dealt = enemy.hp - result.hp;
+        const survives = result.hp > 0;
+        next = {
+          ...next,
+          enemies: survives
+            ? next.enemies.map((e) => (e.instanceId === enemy.instanceId ? { ...e, hp: result.hp, guard: result.guard } : e))
+            : next.enemies.filter((e) => e.instanceId !== enemy.instanceId),
+        };
+        let msg = `${def.name} also deals ${dealt} damage to ${enemy.name}${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
+        if (!survives) msg += ` ${enemy.name} is defeated!`;
+        next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', msg, snapshotOf(next))] };
+      } else {
+        const result = absorbDamage(next.playerHP, next.playerGuard, rider.amount);
+        const dealt = next.playerHP - result.hp;
+        next = { ...next, playerHP: result.hp, playerGuard: result.guard };
+        const msg = `${actorName}'s ${def.name} also deals ${dealt} damage to you${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
+        next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', msg, snapshotOf(next))] };
+      }
+    } else {
+      // bonus-guard -- always self-targeted.
+      if (actor.kind === 'player') {
+        next = { ...next, playerGuard: next.playerGuard + rider.amount };
+        next = {
+          ...next,
+          log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', `${def.name} also raises Guard to ${next.playerGuard}.`, snapshotOf(next))],
+        };
+      } else {
+        next = updateEnemy(next, actor.instanceId, (e) => ({ ...e, guard: e.guard + rider.amount }));
+        const newGuard = next.enemies.find((e) => e.instanceId === actor.instanceId)!.guard;
+        next = {
+          ...next,
+          log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${def.name} also raises Guard to ${newGuard}.`, snapshotOf(next))],
+        };
+      }
+    }
+  }
 
   return next;
 }

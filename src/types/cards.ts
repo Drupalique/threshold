@@ -4,6 +4,15 @@ export interface CreatureCard {
   id: string;
   kind: 'creature';
   suit: SuitId;
+  // References a SpecialCardDef (src/config/specialCards.ts) -- absent means
+  // a plain, fungible copy of the suit, exactly as before this field existed.
+  // A specialId'd card still joins its suit's table set and multiplier like
+  // any other copy; it additionally fires a fixed rider effect when it's
+  // part of the hand cards actually committed to a play (see
+  // combatEngine.ts's applyRiders). Never present on a table card -- riders
+  // only apply from the hand at play time, not from cards sitting on the
+  // table.
+  specialId?: string;
 }
 
 // The Earthquake round's namesake special card (design request: "a special

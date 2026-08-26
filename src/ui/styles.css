@@ -264,6 +264,11 @@ button {
   color: #fff;
 }
 
+.card-chip--special {
+  border: 2px solid #f1c40f;
+  box-shadow: 0 0 6px rgba(241, 196, 15, 0.6);
+}
+
 .card-chip--static {
   cursor: default;
   border: 2px solid transparent;

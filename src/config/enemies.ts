@@ -1,5 +1,6 @@
 import type { EnemyDef } from '../types/enemy';
-import { cardCopies } from './cardHelpers';
+import { cardCopies, specialCard } from './cardHelpers';
+import { specialCardById } from './specialCards';
 
 /**
  * Static enemy roster. Each def's `deck` is a small, directly-authored card
@@ -21,7 +22,14 @@ export const ENEMY_DEFS: EnemyDef[] = [
     // a glass-cannon striker. Deck mirrors that ratio directly: no
     // guard/boon/status suits at all, so it can only ever attack or buff
     // itself, never patch up or debuff back.
-    deck: [...cardCopies('wolf', 7, 'wolfkin-deck'), ...cardCopies('vigor', 3, 'wolfkin-deck')],
+    // One of its Wolf copies is the named Alpha Wolf signature card (see
+    // config/specialCards.ts) -- suit count is unchanged, so its threat/buff
+    // ratio is identical to before specials existed.
+    deck: [
+      ...cardCopies('wolf', 6, 'wolfkin-deck'),
+      specialCard(specialCardById('alpha-wolf'), 'wolfkin-deck'),
+      ...cardCopies('vigor', 3, 'wolfkin-deck'),
+    ],
   },
   {
     id: 'ember-wretch',
@@ -33,7 +41,12 @@ export const ENEMY_DEFS: EnemyDef[] = [
     // defensive/supportive). Deck stays almost entirely Ember, with just 2
     // Ward cards so it isn't literally incapable of ever guarding -- a
     // near-total glass cannon, more so than Wolf-kin.
-    deck: [...cardCopies('ember', 8, 'emberwretch-deck'), ...cardCopies('ward', 2, 'emberwretch-deck')],
+    // One of its Ember copies is the named Wildfire signature card.
+    deck: [
+      ...cardCopies('ember', 7, 'emberwretch-deck'),
+      specialCard(specialCardById('wildfire'), 'emberwretch-deck'),
+      ...cardCopies('ward', 2, 'emberwretch-deck'),
+    ],
   },
   {
     id: 'rot-husk',
@@ -47,8 +60,10 @@ export const ENEMY_DEFS: EnemyDef[] = [
     // Ward, bank a shield" step -- now that Ward is a symmetric suit, Rot
     // Husk can finally guard ITSELF directly instead of laboriously
     // fattening a pile it could never claim).
+    // One of its Rot copies is the named Rot Colossus signature card.
     deck: [
-      ...cardCopies('rot', 3, 'rothusk-deck'),
+      ...cardCopies('rot', 2, 'rothusk-deck'),
+      specialCard(specialCardById('rot-colossus'), 'rothusk-deck'),
       ...cardCopies('hex', 3, 'rothusk-deck'),
       ...cardCopies('grace', 2, 'rothusk-deck'),
       ...cardCopies('ward', 2, 'rothusk-deck'),
@@ -65,8 +80,10 @@ export const ENEMY_DEFS: EnemyDef[] = [
     // since it was always the biggest single hit in its old cycle. The
     // highest-minFloor, highest-HP enemy also gets the most balanced kit of
     // the four, by design -- it's the "complete" threat.
+    // One of its Spider copies is the named Broodcaller signature card.
     deck: [
-      ...cardCopies('spider', 4, 'spiderbroodmother-deck'),
+      ...cardCopies('spider', 3, 'spiderbroodmother-deck'),
+      specialCard(specialCardById('broodcaller'), 'spiderbroodmother-deck'),
       ...cardCopies('venom', 3, 'spiderbroodmother-deck'),
       ...cardCopies('ward', 3, 'spiderbroodmother-deck'),
     ],

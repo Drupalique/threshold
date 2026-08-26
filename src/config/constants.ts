@@ -2,7 +2,8 @@ import type { SuitDef, SuitId } from '../types/suits';
 import type { DoorColor } from '../types/door';
 import type { PoolSizeBand, IntRange } from '../types/room';
 import type { CreatureCard } from '../types/cards';
-import { cardCopies } from './cardHelpers';
+import { cardCopies, specialCard } from './cardHelpers';
+import { specialCardById } from './specialCards';
 
 // --- Content data -----------------------------------------------------
 
@@ -192,16 +193,26 @@ export const RUN_MAX_DEPTH = 10;
 // suits with a light scattering of every support suit so an early room
 // almost always has *something* live to play. A balance surface like every
 // ratio constant above; expect to retune with fresh playtesting data.
+// One copy per suit is swapped for that suit's named special card (see
+// config/specialCards.ts) rather than added on top -- deck size (19) and
+// per-suit counts are unchanged from before specials existed, so every
+// existing balance ratio still applies unmodified.
 export const STARTER_DECK: CreatureCard[] = [
-  ...cardCopies('wolf', 3, 'starter'),
-  ...cardCopies('ember', 3, 'starter'),
-  ...cardCopies('rot', 3, 'starter'),
-  ...cardCopies('spider', 3, 'starter'),
-  ...cardCopies('grace', 2, 'starter'),
-  ...cardCopies('ward', 2, 'starter'),
-  ...cardCopies('hex', 1, 'starter'),
-  ...cardCopies('venom', 1, 'starter'),
-  ...cardCopies('vigor', 1, 'starter'),
+  ...cardCopies('wolf', 2, 'starter'),
+  specialCard(specialCardById('alpha-wolf'), 'starter'),
+  ...cardCopies('ember', 2, 'starter'),
+  specialCard(specialCardById('wildfire'), 'starter'),
+  ...cardCopies('rot', 2, 'starter'),
+  specialCard(specialCardById('rot-colossus'), 'starter'),
+  ...cardCopies('spider', 2, 'starter'),
+  specialCard(specialCardById('broodcaller'), 'starter'),
+  ...cardCopies('grace', 1, 'starter'),
+  specialCard(specialCardById('blessed-grace'), 'starter'),
+  ...cardCopies('ward', 1, 'starter'),
+  specialCard(specialCardById('bastion-heart'), 'starter'),
+  specialCard(specialCardById('withering-hex'), 'starter'),
+  specialCard(specialCardById('widows-kiss'), 'starter'),
+  specialCard(specialCardById('battle-fury'), 'starter'),
 ];
 
 // --- Rewards ------------------------------------------------------------
@@ -211,6 +222,12 @@ export const STARTER_DECK: CreatureCard[] = [
 // plays for a turn is the single strongest thing a card can do, and it's a
 // permanent deck addition rather than a one-turn-only mint.
 export const QUAKE_REWARD_RATIO = 0.08;
+
+// Odds a reward offer's slot is a named special card (config/specialCards.ts)
+// instead of a plain suited one -- higher than Quake since a rider is a
+// smaller, non-permanent-turn-warping bonus, but still meaningfully rarer
+// than an ordinary suit pick so it reads as a notable find.
+export const SPECIAL_REWARD_RATIO = 0.15;
 
 export const REWARD_OPTION_COUNT = 3;
 
