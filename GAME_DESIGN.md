@@ -46,6 +46,17 @@ Played hand cards go to the actor's discard pile, not out of existence.
 
 Threat/Hex/Venom plays require picking **which alive enemy** to target — table piles aren't owned by any enemy, so any suit's cards can be aimed at any alive enemy. The UI auto-resolves this silently when only one enemy is alive.
 
+### Riders
+
+Every creature card fires a small **rider** effect on top of its category's effect when it's actually committed as part of a play from a hand — a fixed bonus, not another multiplier, and never triggered by a card just sitting on the table:
+
+- **Basic rider** (every plain, unnamed card): `BASIC_RIDER_AMOUNT` (**1**), kind determined by the suit's own category — threat/weaken/poison suits deal `1` bonus damage to the play's own target, boon/guard/strength suits grant the actor `1` bonus Guard. So even a Hex or Venom play, which itself only inflicts a status stack with no HP effect, still chips 1 HP via its cards' riders.
+- **Named special rider** (nine "signature" cards, one per suit, `src/config/specialCards.ts`): same damage-vs-guard split as the basic rider for that suit, but a flat `RIDER_AMOUNT` (**3**) instead of 1, and its own flavor name (Alpha Wolf, Wildfire, Rot Colossus, Broodcaller, Blessed Grace, Bastion Heart, Withering Hex, Widow's Kiss, Battle Fury). A special card is otherwise an ordinary copy of its suit — it joins the same table set and multiplier as any other card of that suit.
+
+A play's cards always share one suit, so every rider in a single play shares one kind (damage or guard) — they're summed into a single bonus and a single log line: naming the source when exactly one card was played (its special name, or its suit name for a plain card), and reading generically ("Rider effects also deal/raise...") when several cards fired together. Riders are unaffected by Weaken/Strength (only the category's own magnitude is).
+
+Cards on the table are always just their suit, with no rider — the UI strips a played card back down to `{id, suit, ownerId}` the instant it lands there, and `TableCard` has no field to carry a rider identity even if it wanted to. Riders only ever fire once, at the moment a card leaves a hand.
+
 ### Suits
 
 Nine suits, each belonging to one category that determines what a play of that suit does:
@@ -90,6 +101,8 @@ An enemy makes `ENEMY_PLAYS_PER_TURN` (**1**) play on its own turn (half the pla
 | Rot Husk | 18 | 2 | 3× Rot, 3× Hex, 2× Grace, 2× Ward |
 | Spider Broodmother | 22 | 3 | 4× Spider, 3× Venom, 3× Ward |
 
+One copy of each enemy's own primary threat suit is that suit's named special card (see Riders, §2) rather than an added extra — e.g. Wolf-kin's 7 Wolf cards include its 1 Alpha Wolf, not 7 plain Wolf plus an 8th card — so deck size and suit ratios above are unchanged from before specials existed.
+
 ### How many enemies, and how hard
 
 Enemy count per room is **weighted by floor**, not flat: `pickEnemyCount` blends `ENEMY_COUNT_WEIGHTS_EARLY` (`[6, 2, 0]` — mostly solo at floor 1) toward `ENEMY_COUNT_WEIGHTS_LATE` (`[1, 3, 5]` — 3-packs common by floor 10) linearly across floor 1..`RUN_MAX_DEPTH`. Selection among eligible-by-`minFloor` defs is uniform, not weighted toward harder defs as floors deepen — a known open tuning gap.
@@ -116,7 +129,7 @@ The player's hand is **not** generated per-room. `RunState.deck` is a run-level 
 
 **Per room:** `run.deck` is freshly shuffled into a `drawPile`, dealing an opening hand of `PLAYER_HAND_SIZE` (**7**). At the end of the player's own turn, the hand **tops back up** to that size rather than being fully discarded and redrawn — whatever wasn't played stays in hand, only the shortfall is drawn from `drawPile` (reshuffling `discardPile` back in if it runs dry). Nothing in the hand cycle is ever permanently deleted — played cards go to `discardPile` and cycle back on the next reshuffle.
 
-**Reward (after clearing a non-final room):** `REWARD_OPTION_COUNT` (**3**) options, uniform across every suit in the game (not just the room just cleared), with Quake folded in at `QUAKE_REWARD_RATIO` (8%) as one possible slot. Pick one; it's appended to `run.deck`. No removal/upgrade options exist yet.
+**Reward (after clearing a non-final room):** `REWARD_OPTION_COUNT` (**3**) options, uniform across every suit in the game (not just the room just cleared), with Quake folded in at `QUAKE_REWARD_RATIO` (8%) and a named special card (see Riders, §2) folded in at `SPECIAL_REWARD_RATIO` (15%) as possible slots. Pick one; it's appended to `run.deck`. No removal/upgrade options exist yet.
 
 **Known risk (unresolved):** the deck stays suit-diverse across all 9 suits, but any given room's table only ever draws from 1–2 threat suits — a 7-card hand from the full deck often doesn't cluster on the room's actual suits, shrinking the "big spike" play moment. Door color signaling (below) is the intended, not-yet-fully-wired compensating mechanism.
 
@@ -166,6 +179,10 @@ WEAKEN_PCT_PER_STACK = 0.1
 
 PLAYS_PER_TURN_BASE = 2
 QUAKE_REWARD_RATIO = 0.08         REWARD_OPTION_COUNT = 3
+SPECIAL_REWARD_RATIO = 0.15
+
+BASIC_RIDER_AMOUNT = 1     (src/config/specialCards.ts -- every plain card's rider)
+RIDER_AMOUNT = 3           (src/config/specialCards.ts -- every named special card's rider)
 
 DOOR_CORRELATION_RATE = 0.75
 RUN_MAX_DEPTH = 10
