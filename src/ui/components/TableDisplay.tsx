@@ -79,7 +79,7 @@ function OwnerLane({
               </div>
               <div className="table-group-cards">
                 {suitCards.map((c) => (
-                  <CardChip key={c.id} card={{ id: c.id, kind: 'creature', suit: c.suit }} />
+                  <CardChip key={c.id} card={{ id: c.id, kind: 'creature', suit: c.suit }} showRider={false} />
                 ))}
               </div>
             </div>

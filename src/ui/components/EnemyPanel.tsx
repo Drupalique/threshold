@@ -2,8 +2,9 @@ import type { EnemyInstance } from '../../types/enemy';
 import type { CreatureCard } from '../../types/cards';
 import type { StatusId } from '../../types/status';
 import { STATUS_DEFS } from '../../types/status';
-import { SUIT_DEFINITIONS } from '../../config/constants';
 import { MeterBar } from './MeterBar';
+import { CardFace } from './CardChip';
+import { cardChipStyle, cardChipTitle } from '../cardDisplay';
 
 const STATUS_ICON: Record<StatusId, string> = {
   weaken: '☠',
@@ -29,12 +30,14 @@ export function StatusBadges({ statuses }: { statuses: Partial<Record<StatusId, 
 // Non-interactive card display for an enemy's hand -- deliberately a <span>,
 // not the clickable CardChip <button>, since an enemy card here can itself
 // already be a <button> (when targetable) and nesting interactive elements
-// inside a <button> is invalid HTML.
+// inside a <button> is invalid HTML. Shares CardChip's face/style/title so a
+// named special or a basic rider reads identically for an enemy's hand as it
+// does for the player's own.
 function StaticCardChip({ card }: { card: CreatureCard }) {
-  const suitDef = SUIT_DEFINITIONS.find((s) => s.id === card.suit)!;
+  const classes = ['card-chip', 'card-chip--static', card.specialId ? 'card-chip--special' : ''].filter(Boolean).join(' ');
   return (
-    <span className="card-chip card-chip--static" style={{ background: suitDef.displayColor }}>
-      {suitDef.name}
+    <span className={classes} style={cardChipStyle(card)} title={cardChipTitle(card)}>
+      <CardFace card={card} />
     </span>
   );
 }

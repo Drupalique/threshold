@@ -14,7 +14,7 @@ import { shuffleDeck, drawCards, topUpHand } from './deckState';
 import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTableForRound } from './tableState';
 import { chooseEnemyPlay } from './enemyAI';
 import { enemyDefById } from '../config/enemies';
-import { specialCardById } from '../config/specialCards';
+import { specialCardById, riderForCard } from '../config/specialCards';
 import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken } from './statusEffects';
 import { STATUS_DEFS } from '../types/status';
 import {
@@ -379,15 +379,18 @@ function performPlay(
 }
 
 /**
- * Fires every specific card's rider effect for cards that were part of this
- * play (see types/specialCards.ts) -- runs after the suit's own category
- * effect (and its log line) has fully resolved, and never touches the
- * magnitude formula above. A play with several specific cards fires all of
- * their riders independently; a plain suit copy with no specialId
- * contributes nothing here. bonus-damage reuses the same target the category
- * effect already resolved against -- only ever paired with threat/weaken/
- * poison suits, so targetInstanceId is guaranteed set for a player actor by
- * isLegalPlay's own requiresEnemyTarget check.
+ * Fires every played card's rider effect (see types/specialCards.ts) -- runs
+ * after the suit's own category effect (and its log line) has fully
+ * resolved, and never touches the magnitude formula above. Every creature
+ * card carries a rider now: a named special's own (bigger) rider if it has a
+ * specialId, otherwise its suit's small basic rider (config/specialCards.ts's
+ * basicRiderForCategory). A play's cards always share one suit, so they
+ * always share one rider kind too -- summed into a single combined
+ * damage-or-guard bump and one log line, rather than one line per card,
+ * since a big play can commit many cards at once. bonus-damage reuses the
+ * same target the category effect already resolved against -- only ever
+ * paired with threat/weaken/poison suits, so targetInstanceId is guaranteed
+ * set for a player actor by isLegalPlay's own requiresEnemyTarget check.
  */
 function applyRiders(
   state: CombatState,
@@ -398,18 +401,29 @@ function applyRiders(
   let next = state;
   const actorName = actorNameOf(state, actor);
 
+  let bonusDamage = 0;
+  let bonusGuard = 0;
   for (const card of playedCards) {
-    if (!card.specialId) continue;
-    const def = specialCardById(card.specialId);
-    const rider = def.rider;
+    const rider = riderForCard(card, suitCategory(card.suit));
+    if (rider.kind === 'bonus-damage') bonusDamage += rider.amount;
+    else bonusGuard += rider.amount;
+  }
 
-    if (rider.kind === 'bonus-damage') {
-      if (actor.kind === 'player') {
-        // The target may already have been defeated by this same play's own
-        // category effect -- nothing left to hit.
-        const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
-        if (!enemy) continue;
-        const result = absorbDamage(enemy.hp, enemy.guard, rider.amount);
+  // Single-card plays keep the flavorful source name (a named special's own
+  // name, or the plain suit's name) in the log line; multi-card plays fold
+  // every card's rider into one generic, correctly-pluralized line instead
+  // of naming each contributor.
+  const single = playedCards.length === 1 ? playedCards[0] : undefined;
+  const sourceLabel = single ? (single.specialId ? specialCardById(single.specialId).name : suitName(single.suit)) : 'Rider effects';
+  const plural = !single;
+
+  if (bonusDamage > 0) {
+    if (actor.kind === 'player') {
+      // The target may already have been defeated by this same play's own
+      // category effect -- nothing left to hit.
+      const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
+      if (enemy) {
+        const result = absorbDamage(enemy.hp, enemy.guard, bonusDamage);
         const dealt = enemy.hp - result.hp;
         const survives = result.hp > 0;
         next = {
@@ -418,32 +432,34 @@ function applyRiders(
             ? next.enemies.map((e) => (e.instanceId === enemy.instanceId ? { ...e, hp: result.hp, guard: result.guard } : e))
             : next.enemies.filter((e) => e.instanceId !== enemy.instanceId),
         };
-        let msg = `${def.name} also deals ${dealt} damage to ${enemy.name}${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
+        let msg = `${sourceLabel} also ${plural ? 'deal' : 'deals'} ${dealt} damage to ${enemy.name}${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
         if (!survives) msg += ` ${enemy.name} is defeated!`;
         next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', msg, snapshotOf(next))] };
-      } else {
-        const result = absorbDamage(next.playerHP, next.playerGuard, rider.amount);
-        const dealt = next.playerHP - result.hp;
-        next = { ...next, playerHP: result.hp, playerGuard: result.guard };
-        const msg = `${actorName}'s ${def.name} also deals ${dealt} damage to you${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
-        next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', msg, snapshotOf(next))] };
       }
     } else {
-      // bonus-guard -- always self-targeted.
-      if (actor.kind === 'player') {
-        next = { ...next, playerGuard: next.playerGuard + rider.amount };
-        next = {
-          ...next,
-          log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', `${def.name} also raises Guard to ${next.playerGuard}.`, snapshotOf(next))],
-        };
-      } else {
-        next = updateEnemy(next, actor.instanceId, (e) => ({ ...e, guard: e.guard + rider.amount }));
-        const newGuard = next.enemies.find((e) => e.instanceId === actor.instanceId)!.guard;
-        next = {
-          ...next,
-          log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${def.name} also raises Guard to ${newGuard}.`, snapshotOf(next))],
-        };
-      }
+      const result = absorbDamage(next.playerHP, next.playerGuard, bonusDamage);
+      const dealt = next.playerHP - result.hp;
+      next = { ...next, playerHP: result.hp, playerGuard: result.guard };
+      const msg = `${actorName}'s ${sourceLabel} also ${plural ? 'deal' : 'deals'} ${dealt} damage to you${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
+      next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', msg, snapshotOf(next))] };
+    }
+  }
+
+  if (bonusGuard > 0) {
+    // bonus-guard -- always self-targeted.
+    if (actor.kind === 'player') {
+      next = { ...next, playerGuard: next.playerGuard + bonusGuard };
+      next = {
+        ...next,
+        log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', `${sourceLabel} also ${plural ? 'raise' : 'raises'} Guard to ${next.playerGuard}.`, snapshotOf(next))],
+      };
+    } else {
+      next = updateEnemy(next, actor.instanceId, (e) => ({ ...e, guard: e.guard + bonusGuard }));
+      const newGuard = next.enemies.find((e) => e.instanceId === actor.instanceId)!.guard;
+      next = {
+        ...next,
+        log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${sourceLabel} also ${plural ? 'raise' : 'raises'} Guard to ${newGuard}.`, snapshotOf(next))],
+      };
     }
   }
 

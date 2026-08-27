@@ -96,8 +96,9 @@ describe('legality and plays per turn', () => {
       rng,
     );
 
-    // 4 already on the table + 3 played = 7 on the table x 3 hand cards = 21 damage
-    expect(next.enemies[0].hp).toBe(30 - 21);
+    // 4 already on the table + 3 played = 7 on the table x 3 hand cards = 21
+    // damage, plus each of the 3 played cards' own +1 basic rider = 24 total
+    expect(next.enemies[0].hp).toBe(30 - 21 - 3);
     expect(next.playerHand.map((c) => c.id)).not.toContain('ph1');
     // The played cards land on the table too, tagged to the player.
     expect(next.table.filter((c) => c.suit === 'wolf' && c.ownerId === 'player').length).toBe(3);
@@ -146,7 +147,9 @@ describe('legality and plays per turn', () => {
     );
     expect(state.activeTurn).toBe('player'); // first of two plays -- turn continues
     expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE - 1);
-    expect(state.enemies[0].hp).toBe(20 - 2); // 1 already on the table + 1 played = 2 on the table x 1 hand card
+    // 1 already on the table + 1 played = 2 on the table x 1 hand card = 2,
+    // plus the played card's own +1 basic rider = 3
+    expect(state.enemies[0].hp).toBe(20 - 2 - 1);
 
     state = applyCombatAction(
       state,
@@ -155,8 +158,9 @@ describe('legality and plays per turn', () => {
     );
     // The first play already claimed the room's 1 wolf card, so the second
     // play only compounds off the player's own contribution from the prior
-    // play (1 wolf now on the table, + this play's own 1 = 2).
-    expect(state.enemies[0].hp).toBe(20 - 2 - 2);
+    // play (1 wolf now on the table, + this play's own 1 = 2), plus another
+    // +1 basic rider.
+    expect(state.enemies[0].hp).toBe(20 - 2 - 1 - 2 - 1);
     expect(state.activeTurn).toBe('enemy'); // plays exhausted -- turn actually ends now
   });
 
@@ -191,7 +195,9 @@ describe('legality and plays per turn', () => {
       { type: 'PLAY_SET', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
     );
-    expect(next.enemies[0].hp).toBe(20 - 4); // 0 already on the table + 2 played = 2 on the table x 2 hand cards = 4
+    // 0 already on the table + 2 played = 2 on the table x 2 hand cards = 4,
+    // plus each of the 2 played cards' own +1 basic rider = 6 total
+    expect(next.enemies[0].hp).toBe(20 - 4 - 2);
     expect(next.table.filter((c) => c.suit === 'rot' && c.ownerId === 'player').length).toBe(2); // played cards still land on the table
   });
 
@@ -295,8 +301,10 @@ describe('table multiplier math', () => {
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
     );
-    // 2 already on the table (1 from room, 1 from the enemy itself) + 1 played = 3 on the table x 1 hand card = 3
-    expect(next.enemies[0].hp).toBe(20 - 3);
+    // 2 already on the table (1 from room, 1 from the enemy itself) + 1
+    // played = 3 on the table x 1 hand card = 3, plus the played card's own
+    // +1 basic rider = 4
+    expect(next.enemies[0].hp).toBe(20 - 3 - 1);
   });
 });
 
@@ -317,21 +325,28 @@ describe('same-turn compounding', () => {
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
     );
-    expect(state.enemies[0].hp).toBe(19); // 0 already on the table + 1 played = 1 on the table x 1 hand card = 1
+    // 0 already on the table + 1 played = 1 on the table x 1 hand card = 1,
+    // plus the played card's own +1 basic rider = 2
+    expect(state.enemies[0].hp).toBe(18);
 
     state = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph2'] },
       rng,
     );
-    // The first play's own card is now on the table -- 1 already there + 1 played = 2 on the table x 1 hand card = 2
-    expect(state.enemies[0].hp).toBe(17);
+    // The first play's own card is now on the table -- 1 already there + 1
+    // played = 2 on the table x 1 hand card = 2, plus another +1 basic rider = 3
+    expect(state.enemies[0].hp).toBe(15);
   });
 });
 
 describe('claiming the room caps Quake self-compounding by splitting a suit into singles', () => {
   it('splitting a suit into N one-card plays deals strictly less than one N-card play, since the first single already claims the room\'s whole stockpile', () => {
-    const bigPlayRoom = makeRoom();
+    // Higher HP than makeRoom()'s default 20 -- the big play's magnitude
+    // (18) plus its 3 cards' basic riders (3) now totals 21, which would
+    // otherwise one-shot a 20-HP enemy before its post-play hp is even
+    // readable.
+    const bigPlayRoom = makeRoom({ enemies: [makeEnemy({ hp: 40, hpMax: 40 })] });
     const rngBig = createRng(42);
     let bigPlayState: CombatState = makeCombat(bigPlayRoom, rngBig, 30, 30, {
       table: [
@@ -352,10 +367,12 @@ describe('claiming the room caps Quake self-compounding by splitting a suit into
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2', 'ph3'] },
       rngBig,
     );
-    const bigPlayDamage = 20 - bigPlayState.enemies[0].hp;
-    expect(bigPlayDamage).toBe(18); // 3 already on the table + 3 played = 6 on the table x 3 hand cards
+    const bigPlayDamage = 40 - bigPlayState.enemies[0].hp;
+    // 3 already on the table + 3 played = 6 on the table x 3 hand cards =
+    // 18, plus each of the 3 played cards' own +1 basic rider = 21
+    expect(bigPlayDamage).toBe(18 + 3);
 
-    const splitRoom = makeRoom();
+    const splitRoom = makeRoom({ enemies: [makeEnemy({ hp: 40, hpMax: 40 })] });
     const rngSplit = createRng(43);
     let splitState: CombatState = makeCombat(splitRoom, rngSplit, 30, 30, {
       table: [
@@ -378,13 +395,14 @@ describe('claiming the room caps Quake self-compounding by splitting a suit into
         rngSplit,
       );
     }
-    const splitDamage = 20 - splitState.enemies[0].hp;
+    const splitDamage = 40 - splitState.enemies[0].hp;
     // The first single claims all 3 room wolf cards (3 already there + 1
     // played = 4 on the table x 1 hand = 4), leaving nothing but the
     // player's own prior contribution to compound off of for the next two
     // singles (1 already there + 1 played = 2 x 1 = 2, then 2 already there
-    // + 1 played = 3 x 1 = 3).
-    expect(splitDamage).toBe(4 + 2 + 3);
+    // + 1 played = 3 x 1 = 3) -- plus each of the 3 singles' own +1 basic
+    // rider on top of its own magnitude: (4+1) + (2+1) + (3+1).
+    expect(splitDamage).toBe(4 + 1 + (2 + 1) + (3 + 1));
 
     expect(splitDamage).toBeLessThan(bigPlayDamage);
   });
@@ -538,7 +556,9 @@ describe('enemy turn resolution', () => {
     });
 
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    expect(next.playerHP).toBe(30 - 2); // 1 already on the table + 1 played = 2 on the table x 1 hand card
+    // 1 already on the table + 1 played = 2 on the table x 1 hand card = 2,
+    // plus the played card's own +1 basic rider = 3
+    expect(next.playerHP).toBe(30 - 2 - 1);
     expect(next.log.some((l) => l.type === 'play' && l.actor === 'enemy')).toBe(true);
   });
 
@@ -559,7 +579,7 @@ describe('enemy turn resolution', () => {
 });
 
 describe('guard suit (Ward)', () => {
-  it('a player play banks Guard equal to the usual play magnitude, with no HP/enemy effect', () => {
+  it('a player play banks Guard equal to the usual play magnitude plus its cards\' basic rider guard, with no HP/enemy effect', () => {
     const room = makeRoom();
     const rng = createRng(15);
     const state = makeCombat(room, rng, 30, 30, {
@@ -571,8 +591,9 @@ describe('guard suit (Ward)', () => {
     });
     const next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'ward', handCardIds: ['ph1'] }, rng);
 
-    // 2 already on the table + 1 played = 3 on the table x 1 hand card = 3
-    expect(next.playerGuard).toBe(3);
+    // 2 already on the table + 1 played = 3 on the table x 1 hand card = 3,
+    // plus the played card's own +1 basic rider guard = 4
+    expect(next.playerGuard).toBe(4);
     expect(next.playerHP).toBe(30);
     expect(next.enemies[0].hp).toBe(20);
   });
@@ -590,8 +611,11 @@ describe('guard suit (Ward)', () => {
     });
 
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    // 1 already on the table + 1 played = 2 on the table x 1 hand card = 2; fully absorbed by the 2 banked Guard
-    expect(state.playerHP).toBe(30);
+    // 1 already on the table + 1 played = 2 on the table x 1 hand card = 2,
+    // fully absorbed by the 2 banked Guard -- but the rider fires as a
+    // separate absorbDamage call afterward, by which point Guard is already
+    // spent, so its own +1 basic rider damage gets through untouched.
+    expect(state.playerHP).toBe(29);
     expect(state.playerGuard).toBe(0);
   });
 
@@ -608,7 +632,9 @@ describe('guard suit (Ward)', () => {
 
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     const e1 = state.enemies.find((e) => e.instanceId === 'e1')!;
-    expect(e1.guard).toBe(2); // 1 already on the table + 1 played = 2 on the table x 1 hand card
+    // 1 already on the table + 1 played = 2 on the table x 1 hand card = 2,
+    // plus the played card's own +1 basic rider guard = 3
+    expect(e1.guard).toBe(3);
     expect(state.playerGuard).toBe(0);
   });
 });
@@ -632,7 +658,7 @@ describe('Guard never auto-resets', () => {
 });
 
 describe('weaken suit (Hex)', () => {
-  it('a player play inflicts Weaken stacks on the chosen enemy instead of HP damage, mirroring an enemy\'s own Debuff', () => {
+  it('a player play inflicts Weaken stacks on the chosen enemy, with only its cards\' small basic rider chipping HP, mirroring an enemy\'s own Debuff', () => {
     const room = makeRoom();
     const rng = createRng(27);
     const state = makeCombat(room, rng, 30, 30, {
@@ -648,7 +674,11 @@ describe('weaken suit (Hex)', () => {
       rng,
     );
     expect(next.enemies[0].statuses.weaken).toBe(3); // 2 already on the table + 1 played = 3 on the table x 1 hand card
-    expect(next.enemies[0].hp).toBe(20); // no HP change
+    // Weaken itself does no HP damage -- but weaken is still a "threat-like"
+    // category for rider purposes (config/specialCards.ts's
+    // riderKindForCategory), so the played card's own +1 basic rider still
+    // chips 1 HP.
+    expect(next.enemies[0].hp).toBe(20 - 1);
   });
 
   it('requires an enemy target the same way a threat play does', () => {
@@ -708,7 +738,10 @@ describe('weaken suit (Hex)', () => {
       rng,
     );
     const expectedMagnitude = Math.max(0, Math.round(8 * Math.max(0, 1 - stacks * 0.1)));
-    expect(next.enemies[0].hp).toBe(20 - expectedMagnitude);
+    // The rider is a flat bonus, not run through withWeaken -- each of the 2
+    // played cards' own +1 basic rider (2 total) lands unweakened, on top of
+    // the weakened main magnitude.
+    expect(next.enemies[0].hp).toBe(20 - expectedMagnitude - 2);
     expect(next.playerStatuses.weaken).toBe(stacks); // turn hasn't ended yet -- no decay tick
 
     next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng);
@@ -734,11 +767,14 @@ describe('poison suit (Venom)', () => {
       rng,
     );
     expect(state.enemies[0].statuses.poison).toBe(3); // 2 already on the table + 1 played = 3 on the table x 1 hand card
-    expect(state.enemies[0].hp).toBe(20); // applying the stacks doesn't hit immediately
+    // Poison itself doesn't hit immediately -- but poison is still a
+    // "threat-like" category for rider purposes, so the played card's own
+    // +1 basic rider chips 1 HP right away.
+    expect(state.enemies[0].hp).toBe(20 - 1);
 
     state = { ...state, activeTurn: 'enemy', activeEnemyIndex: 0 };
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    expect(next.enemies[0].hp).toBe(20 - 3); // its own poison tick, at the true end of its own turn
+    expect(next.enemies[0].hp).toBe(20 - 1 - 3); // its own poison tick, at the true end of its own turn
     expect(next.enemies[0].statuses.poison).toBe(2); // decays by 1
   });
 });
@@ -774,13 +810,14 @@ describe('strength suit (Vigor) and boon suit (Grace)', () => {
         { id: 'ph2', kind: 'creature', suit: 'wolf' },
       ],
     });
-    // (1 already on the table + 2 played = 3, +3 Strength = 6) x 2 hand cards = 12
+    // (1 already on the table + 2 played = 3, +3 Strength = 6) x 2 hand
+    // cards = 12, plus each of the 2 played cards' own +1 basic rider = 14
     const next = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
     );
-    expect(next.enemies[0].hp).toBe(20 - 12);
+    expect(next.enemies[0].hp).toBe(20 - 12 - 2);
   });
 
   it('heals the player when played -- no target instance needed', () => {
@@ -838,8 +875,10 @@ describe('strength suit (Vigor) and boon suit (Grace)', () => {
       enemies: [{ ...state.enemies[0], hand: [{ id: 'e1w1', kind: 'creature', suit: 'wolf' }] }],
     };
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
-    // 1 already on the table + 1 played = 2 on the table, boosted by 7 remaining Strength -> 9, x hand 1 = 9
-    expect(next.playerHP).toBe(30 - 9);
+    // 1 already on the table + 1 played = 2 on the table, boosted by 7
+    // remaining Strength -> 9, x hand 1 = 9, plus the played card's own +1
+    // basic rider = 10
+    expect(next.playerHP).toBe(30 - 9 - 1);
     expect(next.enemies[0].statuses.strength).toBe(6); // decays again after this turn
   });
 });
