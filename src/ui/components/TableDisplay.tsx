@@ -95,11 +95,11 @@ function OwnerLane({
 // the player and each enemy it determines whose own-turn-start wipe clears
 // it (see tableState's wipeOwnerTable); for the room it determines when a
 // play claims it instead (see claimRoomCards). Laid out as owner lanes
-// rather than suit-first groups so
-// each entity's play area reads as obviously theirs, with the room's neutral
-// deal sitting in the visual middle between the enemies' lanes and the
-// player's, mirroring where a physical shared table would put untargeted
-// cards relative to the seated players.
+// rather than suit-first groups so each entity's play area reads as
+// obviously theirs. Stacked as three rows -- enemies (one column per
+// enemy) on top, the room's neutral deal in the middle, the player's own
+// plays on the bottom -- mirroring where a physical table would seat the
+// opposition across from the player with the shared deal in between.
 export function TableDisplay({ table, enemies, highlightSuit }: TableDisplayProps) {
   const totalBySuit = new Map<SuitId, number>();
   for (const card of table) totalBySuit.set(card.suit, (totalBySuit.get(card.suit) ?? 0) + 1);

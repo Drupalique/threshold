@@ -295,21 +295,15 @@ button {
 
 /* --- Table --- */
 
-/* Three sections, room in the visual middle between the enemies' lanes and
-   the player's own -- mirrors where a physical table would put a neutral
-   deal relative to the seated players. Stacks vertically once it can't fit
-   three columns side by side. */
+/* Three rows, room in the visual middle between the enemies' row and the
+   player's own -- mirrors where a physical table would put a neutral deal
+   relative to the seated players. Enemies row lays out one column per
+   enemy (see .table-board-section--enemies); room and player rows are each
+   a single full-width lane. */
 .table-board {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
-  align-items: start;
-}
-
-@media (max-width: 720px) {
-  .table-board {
-    grid-template-columns: 1fr;
-  }
 }
 
 .table-board-section {
@@ -360,7 +354,9 @@ button {
 
 .table-lane-groups {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0.4rem;
 }
 
