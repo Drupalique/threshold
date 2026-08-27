@@ -9,7 +9,7 @@ import type { EnemyInstance } from '../../types/enemy';
 import type { CombatState, TableCard } from '../../types/combat';
 import type { Card, CreatureCard } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { PLAYS_PER_TURN_BASE, ENEMY_HAND_SIZE } from '../../config/constants';
+import { PLAYS_PER_TURN_BASE } from '../../config/constants';
 
 function makeEnemy(overrides: Partial<EnemyInstance> = {}): EnemyInstance {
   return {
@@ -955,14 +955,15 @@ describe('enemy hand/deck cycling', () => {
     const rng = createRng(70);
     let state = initCombat(room, rng, 30, 30, DEFAULT_DECK);
     const enemy = state.enemies[0];
-    expect(enemy.hand.length).toBe(ENEMY_HAND_SIZE);
+    const wolfKinHandSize = enemyDefById('wolf-kin').handSize;
+    expect(enemy.hand.length).toBe(wolfKinHandSize);
     const originalHandIds = enemy.hand.map((c) => c.id);
 
     state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
     state = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
 
     const after = state.enemies.find((e) => e.instanceId === 'e1')!;
-    expect(after.hand.length).toBe(ENEMY_HAND_SIZE);
+    expect(after.hand.length).toBe(wolfKinHandSize);
     expect(after.hand.map((c) => c.id)).not.toEqual(originalHandIds);
 
     const deckSize = enemyDefById('wolf-kin').deck.length;
@@ -982,7 +983,12 @@ describe('enemy hand/deck cycling', () => {
     const rng = createRng(72);
     const state = initCombat(room, rng, 30, 30, DEFAULT_DECK);
     expect(state.enemies[0].hand).not.toBe(state.enemies[1].hand);
-    expect(state.enemies[0].hand.map((c) => c.id)).not.toEqual(state.enemies[1].hand.map((c) => c.id));
+    // Compare full shuffled order (hand + drawPile), not just the opening
+    // hand -- with a small per-def handSize, two independent shuffles can
+    // coincidentally deal the same couple of cards into the hand slice even
+    // though the underlying shuffles (and therefore draw piles) differ.
+    const shuffledOrder = (e: EnemyInstance) => [...e.hand, ...e.drawPile].map((c) => c.id);
+    expect(shuffledOrder(state.enemies[0])).not.toEqual(shuffledOrder(state.enemies[1]));
   });
 });
 

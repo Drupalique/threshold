@@ -82,7 +82,7 @@ The player gets `PLAYS_PER_TURN_BASE` (**2**) separate plays per turn before con
 
 ## 3. Enemies
 
-A room holds 1–3 individually-tracked enemies (`EnemyInstance`), each an instance of a small static roster (`src/config/enemies.ts`, `EnemyDef.minFloor`). **Enemies play exactly the same game the player does** — no fixed attack pattern, no telegraphed intent. Each enemy has its own small, directly-authored `deck: CreatureCard[]` (an enemy's suit slant *is* its identity), shuffles a fresh copy of it at the start of the fight, draws an opening hand of `ENEMY_HAND_SIZE` (**4**), and on its own turn calls `engine/enemyAI.ts`'s `chooseEnemyPlay` to pick one suit to play from its current hand.
+A room holds 1–3 individually-tracked enemies (`EnemyInstance`), each an instance of a small static roster (`src/config/enemies.ts`, `EnemyDef.minFloor`). **Enemies play exactly the same game the player does** — no fixed attack pattern, no telegraphed intent. Each enemy has its own small, directly-authored `deck: CreatureCard[]` (an enemy's suit slant *is* its identity), shuffles a fresh copy of it at the start of the fight, draws an opening hand of its own `EnemyDef.handSize` (**2** for the two `minFloor: 1` enemies, **3** at `minFloor: 2`, **4** at `minFloor: 3` — deliberately small and rising by floor tier, so a low-level enemy reads as mechanically simpler/more predictable than a high-level one, not just a smaller HP bar), and on its own turn calls `engine/enemyAI.ts`'s `chooseEnemyPlay` to pick one suit to play from its current hand.
 
 ### Enemy AI (`chooseEnemyPlay`)
 
@@ -90,7 +90,7 @@ A flat heuristic, not a search: score every suit the enemy holds ≥1 hand card 
 
 **Low-HP self-preservation:** below `ENEMY_LOW_HP_HEAL_GUARD_THRESHOLD_PCT` (40%) of `hpMax`, boon/guard candidates get a further weight multiplier, so a hurting enemy is meaningfully (not absolutely) more likely to patch itself up than press an attack.
 
-An enemy makes `ENEMY_PLAYS_PER_TURN` (**1**) play on its own turn (half the player's base allotment, deliberately — there's no enemy analog of Quake). At the end of its own turn, its remaining hand tops back up to `ENEMY_HAND_SIZE` (unplayed cards stay, only the shortfall is drawn — same `topUpHand` logic the player's own deck uses), reshuffling its own discard pile into its own draw pile on empty. Two same-`defId` enemies never share deck/hand array identity — each shuffles independently.
+An enemy makes `ENEMY_PLAYS_PER_TURN` (**1**) play on its own turn (half the player's base allotment, deliberately — there's no enemy analog of Quake). At the end of its own turn, its remaining hand tops back up to its own `EnemyDef.handSize` (unplayed cards stay, only the shortfall is drawn — same `topUpHand` logic the player's own deck uses), reshuffling its own discard pile into its own draw pile on empty. Two same-`defId` enemies never share deck/hand array identity — each shuffles independently.
 
 ### Roster (`src/config/enemies.ts`, first-cut numbers, not balance-tested)
 
@@ -168,7 +168,8 @@ THREAT_SUIT_COUNT_BY_SIZE_BAND = { small: 1, large: 2 }
 ROOM_MIN/MAX_ENEMIES = 1 / 3
 ENEMY_COUNT_WEIGHTS_EARLY = [6, 2, 0]   (floor 1)
 ENEMY_COUNT_WEIGHTS_LATE  = [1, 3, 5]   (floor RUN_MAX_DEPTH)
-ENEMY_HAND_SIZE = 4              ENEMY_PLAYS_PER_TURN = 1
+EnemyDef.handSize (src/config/enemies.ts, per def) = 2 (Wolf-kin, Ember Wretch) / 3 (Rot Husk) / 4 (Spider Broodmother)
+ENEMY_PLAYS_PER_TURN = 1
 ENEMY_LOW_HP_HEAL_GUARD_THRESHOLD_PCT = 0.4
 
 ON_SUIT_RATIO = 0.45      BOON_SUIT_RATIO = 0.12    GUARD_SUIT_RATIO = 0.08

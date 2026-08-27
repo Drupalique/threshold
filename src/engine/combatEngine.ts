@@ -21,7 +21,6 @@ import {
   SUIT_DEFINITIONS,
   WEAKEN_PCT_PER_STACK,
   PLAYS_PER_TURN_BASE,
-  ENEMY_HAND_SIZE,
   ENEMY_PLAYS_PER_TURN,
 } from '../config/constants';
 
@@ -102,7 +101,7 @@ export function initCombat(
     const { drawn: hand, drawPile: enemyDrawPile, discardPile: enemyDiscardPile } = drawCards(
       enemyShuffled,
       [],
-      ENEMY_HAND_SIZE,
+      def.handSize,
       rng,
     );
     return { ...e, hand, drawPile: enemyDrawPile, discardPile: enemyDiscardPile };
@@ -513,15 +512,16 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
     next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'system', 'poison', poisonMessage, snapshotOf(next))] };
   }
 
-  // Top the remaining hand back up to ENEMY_HAND_SIZE, in preparation for
-  // its next turn -- whatever it didn't play stays in hand rather than
-  // being discarded, mirroring the player's own end-of-round top-up.
+  // Top the remaining hand back up to this enemy's own handSize, in
+  // preparation for its next turn -- whatever it didn't play stays in hand
+  // rather than being discarded, mirroring the player's own end-of-round
+  // top-up.
   const beforeRedraw = next.enemies.find((e) => e.instanceId === enemyId)!;
   const { hand, drawPile, discardPile } = topUpHand(
     beforeRedraw.hand,
     beforeRedraw.drawPile,
     beforeRedraw.discardPile,
-    ENEMY_HAND_SIZE,
+    enemyDefById(beforeRedraw.defId).handSize,
     rng,
   );
   next = updateEnemy(next, enemyId, (e) => ({ ...e, hand, drawPile, discardPile }));

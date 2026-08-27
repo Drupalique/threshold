@@ -13,6 +13,8 @@ export interface EnemyDef {
   name: string;
   hpMax: number;
   minFloor: number;
+  /** Opening/top-up hand size for this enemy, replacing the old flat ENEMY_HAND_SIZE -- lower for early-floor enemies so low- and high-level enemies read as mechanically distinct, not just bigger HP bars. */
+  handSize: number;
   deck: CreatureCard[];
 }
 
@@ -28,7 +30,7 @@ export interface EnemyInstance {
   // Own persistent per-room hand/deck cycle, mirroring CombatState's
   // playerHand/drawPile/discardPile 1:1 -- shuffled from a fresh copy of
   // EnemyDef.deck and dealt an opening hand in initCombat, then topped back
-  // up to ENEMY_HAND_SIZE at the end of THIS enemy's own turn (see
+  // up to this def's own EnemyDef.handSize at the end of THIS enemy's own turn (see
   // engine/combatEngine.ts's resolveEnemyTurn), keeping whatever it didn't
   // play, reshuffling discardPile into drawPile on empty exactly like
   // engine/deckState.ts's topUpHand already does for the player. Never

@@ -153,13 +153,12 @@ export const PLAYS_PER_TURN_BASE = 2;
 
 // --- Enemies (symmetric play) ------------------------------------------
 
-// Smaller than PLAYER_HAND_SIZE (7) -- an enemy should usually have fewer
-// live options each turn than the player, echoing the old fixed-single-
-// intent-per-turn feel without literally fixing it. Each authored
-// EnemyDef.deck (config/enemies.ts) is sized around ~2.5x this so the
-// hand's per-turn top-up (every enemy's own turn, see combatEngine.ts's
-// resolveEnemyTurn) rarely needs a mid-hand reshuffle.
-export const ENEMY_HAND_SIZE = 4;
+// Each enemy's hand size is authored per-def (EnemyDef.handSize in
+// config/enemies.ts, alongside hpMax) rather than shared here -- lower for
+// early-floor enemies so low- and high-level enemies read as mechanically
+// distinct, not just bigger HP bars. All are still smaller than
+// PLAYER_HAND_SIZE (7), echoing the old fixed-single-intent-per-turn feel
+// without literally fixing it.
 
 // How many separate plays an enemy makes on its own turn before control
 // passes to the next enemy (or back to the player) -- deliberately half of

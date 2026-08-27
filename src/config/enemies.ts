@@ -18,6 +18,7 @@ export const ENEMY_DEFS: EnemyDef[] = [
     name: 'Wolf-kin',
     hpMax: 14,
     minFloor: 1,
+    handSize: 2,
     // Old pattern was 2 attacks : 1 Strength buff, zero defense or support --
     // a glass-cannon striker. Deck mirrors that ratio directly: no
     // guard/boon/status suits at all, so it can only ever attack or buff
@@ -36,6 +37,7 @@ export const ENEMY_DEFS: EnemyDef[] = [
     name: 'Ember Wretch',
     hpMax: 16,
     minFloor: 1,
+    handSize: 2,
     // Old pattern was the single most attack-heavy kit in the roster (2 of 3
     // steps were plain attacks, the third was disruption, never anything
     // defensive/supportive). Deck stays almost entirely Ember, with just 2
@@ -53,6 +55,7 @@ export const ENEMY_DEFS: EnemyDef[] = [
     name: 'Rot Husk',
     hpMax: 18,
     minFloor: 2,
+    handSize: 3,
     // Old pattern demonstrated the most kit variety of any enemy (debuff,
     // attack, heal, feed-Ward) -- a patient, control-flavored enemy. Deck
     // spreads across all four direct analogs: Rot (threat), Hex (weaken, was
@@ -74,6 +77,7 @@ export const ENEMY_DEFS: EnemyDef[] = [
     name: 'Spider Broodmother',
     hpMax: 22,
     minFloor: 3,
+    handSize: 4,
     // Old pattern: reinforcements, big attack, poison bite, guard -- no heal.
     // Deck reflects the three surviving flavors (Spider/threat, Venom/
     // poison, Ward/guard) roughly evenly, with a slight lean toward Spider

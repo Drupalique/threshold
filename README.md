@@ -47,7 +47,7 @@ The engine has no React dependency and is tested independently via vitest.
 | Constant | Value | Note |
 |---|---|---|
 | `PLAYER_HAND_SIZE` | 7 | |
-| `ENEMY_HAND_SIZE` | 4 | |
+| `EnemyDef.handSize` | 2-4, per def | `src/config/enemies.ts` -- lower for early-floor enemies |
 | `ON_SUIT_RATIO` | 0.45 | Primary balance knob for table dealing |
 | `PLAYER_HP_MAX` | 30 | |
 | `PLAYS_PER_TURN_BASE` | 2 | |
