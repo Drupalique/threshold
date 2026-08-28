@@ -59,15 +59,25 @@ function pickEnemyCount(floor: number, rng: Rng): number {
  * weighting the roll toward higher-minFloor defs as the floor climbs is a
  * documented open tuning knob, not implemented yet.
  *
+ * `isElite` defs (currently just the floor-10 boss, config/enemies.ts) are
+ * excluded from this normal pool outright and never mixed in with weaker
+ * adds -- once `floor` reaches the run's last room, this instead forces a
+ * single guaranteed encounter drawn only from the elite pool, so the run's
+ * final room is always one substantial boss fight rather than a random
+ * roll that happens to include tough defs.
+ *
  * Rooms are generated speculatively for both doors in a pair (only one is
  * ever chosen) -- leaving hand/deck empty here, same as the player's own
  * deck sitting un-shuffled/un-dealt until initCombat touches it, avoids
  * spending RNG draws on a room that might be discarded.
  */
 function pickEnemies(floor: number, roomId: string, rng: Rng): EnemyInstance[] {
-  const eligible = ENEMY_DEFS.filter((d) => d.minFloor <= floor);
+  const isFinalFloor = floor >= RUN_MAX_DEPTH;
+  const eligible = isFinalFloor
+    ? ENEMY_DEFS.filter((d) => d.isElite)
+    : ENEMY_DEFS.filter((d) => d.minFloor <= floor && !d.isElite);
   const pool = eligible.length > 0 ? eligible : ENEMY_DEFS;
-  const count = pickEnemyCount(floor, rng);
+  const count = isFinalFloor ? 1 : pickEnemyCount(floor, rng);
 
   const enemies: EnemyInstance[] = [];
   for (let i = 0; i < count; i++) {
@@ -83,6 +93,7 @@ function pickEnemies(floor: number, roomId: string, rng: Rng): EnemyInstance[] {
       hand: [],
       drawPile: [],
       discardPile: [],
+      isElite: def.isElite,
     });
   }
   return enemies;

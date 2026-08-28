@@ -11,6 +11,19 @@ import { specialCardById } from './specialCards';
  * `minFloor` gates a def into `roomGenerator`'s eligible pool once
  * `run.depth + 1 >= minFloor`. Magnitudes/deck sizes are first-cut numbers,
  * not tuned.
+ *
+ * Floors 1-3 are the original four (below); floors 4-9 add five new
+ * archetypes not previously represented -- a suit-less pure controller, a
+ * Ward-primary tank, the roster's first dual-threat-suit hybrid, a
+ * Grace-primary self-healer, and a late apex glass cannon -- so a full
+ * `RUN_MAX_DEPTH`-length run keeps introducing new kits instead of
+ * recycling the same four with bigger HP bars. `THE_UNDYING_WARLORD` is the
+ * one `isElite` def: `minFloor: 10` alongside `isElite: true` is
+ * belt-and-suspenders (roomGenerator's pickEnemies excludes every
+ * `isElite` def from the normal pool outright, then forces a solo elite
+ * encounter once `floor >= RUN_MAX_DEPTH`), guaranteeing the run's final
+ * room is a single substantial boss fight rather than a random 3-pack of
+ * whatever's eligible.
  */
 export const ENEMY_DEFS: EnemyDef[] = [
   {
@@ -90,6 +103,146 @@ export const ENEMY_DEFS: EnemyDef[] = [
       specialCard(specialCardById('broodcaller'), 'spiderbroodmother-deck'),
       ...cardCopies('venom', 3, 'spiderbroodmother-deck'),
       ...cardCopies('ward', 3, 'spiderbroodmother-deck'),
+    ],
+  },
+  {
+    id: 'marsh-wraith',
+    name: 'Marsh Wraith',
+    hpMax: 24,
+    minFloor: 4,
+    handSize: 3,
+    // The roster's first def with zero threat-category cards -- it can
+    // never claim a threat suit at all. Entirely Hex (Weaken, cripples the
+    // player's own outgoing threat damage) and Venom (Poison, a ticking
+    // drain), both of which still map to bonus-damage riders (see
+    // specialCards.ts's riderKindForCategory), so it isn't literally
+    // harmless -- it just does all its damage as chip riders and stacking
+    // decay instead of a direct claim, forcing a genuinely different read
+    // than any "big attack coming" enemy.
+    deck: [
+      ...cardCopies('hex', 4, 'marshwraith-deck'),
+      specialCard(specialCardById('withering-hex'), 'marshwraith-deck'),
+      ...cardCopies('venom', 4, 'marshwraith-deck'),
+      specialCard(specialCardById('widows-kiss'), 'marshwraith-deck'),
+    ],
+  },
+  {
+    id: 'stoneward-golem',
+    name: 'Stoneward Golem',
+    hpMax: 27,
+    minFloor: 5,
+    handSize: 3,
+    // First def where Ward -- previously always a 2-3 card support
+    // sprinkle on someone else's kit -- is the single biggest suit: a true
+    // tank that banks its own Guard faster than its middling Rot threat
+    // can be raced down. The 2 Vigor cards mean a fight dragged out long
+    // enough lets it start snowballing too, punishing a purely defensive
+    // stall against it.
+    deck: [
+      ...cardCopies('ward', 3, 'stonewardgolem-deck'),
+      specialCard(specialCardById('bastion-heart'), 'stonewardgolem-deck'),
+      ...cardCopies('rot', 3, 'stonewardgolem-deck'),
+      specialCard(specialCardById('rot-colossus'), 'stonewardgolem-deck'),
+      ...cardCopies('vigor', 2, 'stonewardgolem-deck'),
+    ],
+  },
+  {
+    id: 'chimera-stalker',
+    name: 'Chimera Stalker',
+    hpMax: 30,
+    minFloor: 6,
+    handSize: 4,
+    // The roster's first dual-threat-suit def -- Wolf and Spider (both
+    // "red" in SUIT_COLOR_FAMILY) at even weight, so a single Weaken/guard
+    // plan built around one threat suit only ever answers half its
+    // pressure. Ward at the same weight as either threat suit keeps it
+    // from being pure aggression on top of that.
+    deck: [
+      ...cardCopies('wolf', 2, 'chimerastalker-deck'),
+      specialCard(specialCardById('alpha-wolf'), 'chimerastalker-deck'),
+      ...cardCopies('spider', 2, 'chimerastalker-deck'),
+      specialCard(specialCardById('broodcaller'), 'chimerastalker-deck'),
+      ...cardCopies('ward', 3, 'chimerastalker-deck'),
+    ],
+  },
+  {
+    id: 'cinder-priest',
+    name: 'Cinder Priest',
+    hpMax: 30,
+    minFloor: 7,
+    handSize: 4,
+    // First def where Grace -- previously a 1-2 card garnish on Rot Husk's
+    // kit -- is a full half of the deck: a genuine self-healer that turns
+    // a slow fight into a war of attrition instead of a burst race,
+    // directly rewarding (and punishing indecision in) a longer run rather
+    // than just gating a bigger HP bar behind a later floor.
+    deck: [
+      ...cardCopies('ember', 3, 'cinderpriest-deck'),
+      specialCard(specialCardById('wildfire'), 'cinderpriest-deck'),
+      ...cardCopies('grace', 3, 'cinderpriest-deck'),
+      specialCard(specialCardById('blessed-grace'), 'cinderpriest-deck'),
+    ],
+  },
+  {
+    id: 'bonecrusher-ogre',
+    name: 'Bonecrusher Ogre',
+    hpMax: 34,
+    minFloor: 8,
+    handSize: 4,
+    // Rot's turn at the "near-total glass cannon" archetype Wolf-kin/Ember
+    // Wretch established early (§3) -- Rot had only ever appeared as a
+    // control suit (Rot Husk, Stoneward Golem) until now. Almost entirely
+    // Rot with just enough Vigor to keep snowballing a fight that runs
+    // long, no defensive or support suit at all.
+    deck: [
+      ...cardCopies('rot', 6, 'bonecrusherogre-deck'),
+      specialCard(specialCardById('rot-colossus'), 'bonecrusherogre-deck'),
+      ...cardCopies('vigor', 2, 'bonecrusherogre-deck'),
+    ],
+  },
+  {
+    id: 'deepfang-matriarch',
+    name: 'Deepfang Matriarch',
+    hpMax: 36,
+    minFloor: 9,
+    handSize: 5,
+    // The late-game apex predator: Spider Broodmother's own kit pushed
+    // further, Spider count nearly doubled and Ward dropped entirely --
+    // by floor 9 the early glass cannons are trivial, so this reintroduces
+    // real one-suit burst danger with the biggest hand of any non-elite
+    // def to back it up.
+    deck: [
+      ...cardCopies('spider', 7, 'deepfangmatriarch-deck'),
+      specialCard(specialCardById('broodcaller'), 'deepfangmatriarch-deck'),
+      ...cardCopies('venom', 3, 'deepfangmatriarch-deck'),
+    ],
+  },
+  {
+    id: 'the-undying-warlord',
+    name: 'The Undying Warlord',
+    hpMax: 65,
+    minFloor: 10,
+    handSize: 6,
+    isElite: true,
+    // The run's one guaranteed boss fight (see roomGenerator.ts's
+    // pickEnemies and the file-level comment above) -- roughly double the
+    // next-highest def's HP, the biggest hand in the game (still under
+    // PLAYER_HAND_SIZE's 7, keeping the "never quite player-sized" rule
+    // intact), and a kit that reprises the run's own arc: Wolf (the very
+    // first threat suit the player ever faced) and Rot (a control suit)
+    // together as its two threat suits, Ward so it can't be burst down
+    // like an early glass cannon, and Vigor so a dragged-out fight only
+    // gets more dangerous, never less. Four of its suits carry that suit's
+    // named special, more than any other single def in the roster.
+    deck: [
+      ...cardCopies('wolf', 4, 'undyingwarlord-deck'),
+      specialCard(specialCardById('alpha-wolf'), 'undyingwarlord-deck'),
+      ...cardCopies('rot', 4, 'undyingwarlord-deck'),
+      specialCard(specialCardById('rot-colossus'), 'undyingwarlord-deck'),
+      ...cardCopies('ward', 2, 'undyingwarlord-deck'),
+      specialCard(specialCardById('bastion-heart'), 'undyingwarlord-deck'),
+      ...cardCopies('vigor', 2, 'undyingwarlord-deck'),
+      specialCard(specialCardById('battle-fury'), 'undyingwarlord-deck'),
     ],
   },
 ];

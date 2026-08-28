@@ -94,14 +94,25 @@ An enemy makes `ENEMY_PLAYS_PER_TURN` (**1**) play on its own turn (half the pla
 
 ### Roster (`src/config/enemies.ts`, first-cut numbers, not balance-tested)
 
-| Enemy | HP | Min floor | Deck |
-|---|---|---|---|
-| Wolf-kin | 14 | 1 | 7× Wolf, 3× Vigor |
-| Ember Wretch | 16 | 1 | 8× Ember, 2× Ward |
-| Rot Husk | 18 | 2 | 3× Rot, 3× Hex, 2× Grace, 2× Ward |
-| Spider Broodmother | 22 | 3 | 4× Spider, 3× Venom, 3× Ward |
+| Enemy | HP | Min floor | Hand | Deck |
+|---|---|---|---|---|
+| Wolf-kin | 14 | 1 | 2 | 7× Wolf, 3× Vigor |
+| Ember Wretch | 16 | 1 | 2 | 8× Ember, 2× Ward |
+| Rot Husk | 18 | 2 | 3 | 3× Rot, 3× Hex, 2× Grace, 2× Ward |
+| Spider Broodmother | 22 | 3 | 4 | 4× Spider, 3× Venom, 3× Ward |
+| Marsh Wraith | 24 | 4 | 3 | 5× Hex, 5× Venom |
+| Stoneward Golem | 27 | 5 | 3 | 4× Ward, 4× Rot, 2× Vigor |
+| Chimera Stalker | 30 | 6 | 4 | 3× Wolf, 3× Spider, 3× Ward |
+| Cinder Priest | 30 | 7 | 4 | 4× Ember, 4× Grace |
+| Bonecrusher Ogre | 34 | 8 | 4 | 7× Rot, 2× Vigor |
+| Deepfang Matriarch | 36 | 9 | 5 | 8× Spider, 3× Venom |
+| **The Undying Warlord** (elite) | 65 | 10 | 6 | 5× Wolf, 5× Rot, 3× Ward, 3× Vigor |
 
-One copy of each enemy's own primary threat suit is that suit's named special card (see Riders, §2) rather than an added extra — e.g. Wolf-kin's 7 Wolf cards include its 1 Alpha Wolf, not 7 plain Wolf plus an 8th card — so deck size and suit ratios above are unchanged from before specials existed.
+One copy of each enemy's own primary threat suit is that suit's named special card (see Riders, §2) rather than an added extra — e.g. Wolf-kin's 7 Wolf cards include its 1 Alpha Wolf, not 7 plain Wolf plus an 8th card — so deck size and suit ratios above are unchanged from before specials existed. The five floor 4-9 additions each stake out an archetype the original four didn't cover: Marsh Wraith is the roster's only zero-threat-suit def (pure Hex/Venom control, chipping damage entirely through riders and stacking decay); Stoneward Golem is the first Ward-primary tank; Chimera Stalker is the first dual-threat-suit hybrid (Wolf + Spider); Cinder Priest is the first Grace-primary self-healer; Bonecrusher Ogre is Rot's turn at the early "near-total glass cannon" role Wolf-kin/Ember Wretch established; Deepfang Matriarch is a late apex single-suit glass cannon so floor 9 still has real burst danger once the early cannons are trivial.
+
+### The elite floor (floor 10)
+
+`EnemyDef.isElite` marks a def as excluded from every floor's normal eligible pool and reserved for a guaranteed, forced-solo encounter once `floor >= RUN_MAX_DEPTH` (`roomGenerator.ts`'s `pickEnemies`) — the run's last room is always exactly one elite, never a random 3-pack diluted with early defs, and never an elite showing up early. Currently the only `isElite` def is **The Undying Warlord**, roughly double the next-highest def's HP with the roster's biggest hand (6, still under the player's own 7) and a kit that reprises the run's arc — Wolf (the first threat suit the player ever meets) and Rot (a control suit) as dual threats, Ward so it resists an early-game-style burst kill, Vigor so a dragged-out fight only escalates. The UI tags an elite instance with a gold "Elite" badge (`EnemyPanel.tsx`).
 
 ### How many enemies, and how hard
 

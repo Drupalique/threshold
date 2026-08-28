@@ -75,11 +75,13 @@ export function EnemyPanel({
             'enemy-card',
             isTargetable ? 'enemy-card--targetable' : '',
             isSelected ? 'enemy-card--selected' : '',
+            enemy.isElite ? 'enemy-card--elite' : '',
           ]
             .filter(Boolean)
             .join(' ');
           const body = (
             <>
+              {enemy.isElite && <div className="enemy-card-elite-badge">Elite</div>}
               {isSelected && <div className="enemy-card-target-badge">Target</div>}
               <div className="enemy-card-name">{enemy.name}</div>
               <MeterBar label="HP" value={enemy.hp} max={enemy.hpMax} color="#8e44ad" />

@@ -16,6 +16,8 @@ export interface EnemyDef {
   /** Opening/top-up hand size for this enemy, replacing the old flat ENEMY_HAND_SIZE -- lower for early-floor enemies so low- and high-level enemies read as mechanically distinct, not just bigger HP bars. */
   handSize: number;
   deck: CreatureCard[];
+  /** Marks a guaranteed-solo, floor-10-only boss def -- excluded from every other floor's normal eligible pool and never rolled alongside weaker adds. See roomGenerator.ts's pickEnemies. */
+  isElite?: boolean;
 }
 
 /** Runtime instance of an EnemyDef within one room -- two enemies can share a defId, each with its own independent hand/deck cycle. */
@@ -39,4 +41,6 @@ export interface EnemyInstance {
   hand: CreatureCard[];
   drawPile: CreatureCard[];
   discardPile: CreatureCard[];
+  /** Copied from EnemyDef.isElite at instantiation, so the UI can badge it without a def lookup. */
+  isElite?: boolean;
 }

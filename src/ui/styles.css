@@ -144,6 +144,27 @@ button {
   box-shadow: 0 0 0 2px rgba(143, 143, 255, 0.4);
 }
 
+.enemy-card--elite {
+  flex-basis: 240px;
+  width: 240px;
+  border-color: #d4ac0d;
+  background: #262013;
+  box-shadow: 0 0 0 1px rgba(212, 172, 13, 0.4);
+}
+
+.enemy-card-elite-badge {
+  display: inline-block;
+  margin-bottom: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: #d4ac0d;
+  color: #1c1c26;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .enemy-card-target-badge {
   display: inline-block;
   margin-bottom: 0.35rem;
