@@ -6,6 +6,7 @@ import type { Rng } from '../engine/rng';
 export type RunPhase =
   | 'start'
   | 'combat'
+  | 'rest'
   | 'reward'
   | 'door-choice'
   | 'run-complete'

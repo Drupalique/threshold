@@ -8,10 +8,10 @@
 // Usage: npx tsx scripts/playtest.ts <command> [args...]
 // Run `npx tsx scripts/playtest.ts help` for the command list.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, chooseDoor } from '../src/engine/runEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, restHeal, restRemoveCard, chooseDoor } from '../src/engine/runEngine.ts';
 import { createRngFromState } from '../src/engine/rng.ts';
 import { getLegalPlaySets, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
-import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
+import { SUIT_DEFINITIONS, REST_HEAL_PCT } from '../src/config/constants.ts';
 import type { RunState } from '../src/types/run.ts';
 import type { TableCard } from '../src/types/combat.ts';
 import type { SuitId, SuitCategory } from '../src/types/suits.ts';
@@ -143,6 +143,20 @@ function render(run: RunState, lastLogLength: number) {
     for (const entry of toShow) lines.push(`  [t${entry.turn} ${entry.actor}/${entry.type}] ${entry.message}`);
   }
 
+  if (run.phase === 'rest') {
+    const healAmount = Math.round(run.playerHPMax * REST_HEAL_PCT);
+    lines.push('');
+    lines.push(`A place to rest. Options (exclusive -- pick one):`);
+    lines.push(`  rest-heal              restore ${healAmount} HP (capped at max)`);
+    lines.push(`  rest-remove <cardId>   permanently remove one card from your deck`);
+    lines.push('');
+    lines.push(`Deck (${run.deck.length} cards):`);
+    for (const card of run.deck) {
+      const desc = card.kind === 'quake' ? 'QUAKE' : `${card.suit} (${suitCategory(card.suit)})`;
+      lines.push(`  [${card.id}] ${desc}`);
+    }
+  }
+
   if (run.phase === 'reward' && run.rewardOptions) {
     lines.push('');
     lines.push(`Choose a reward card (deck size ${run.deck.length}):`);
@@ -270,6 +284,39 @@ switch (cmd) {
     break;
   }
 
+  case 'rest-heal': {
+    const { run } = load();
+    if (run.phase !== 'rest') {
+      console.log('Not currently at a rest room.');
+      process.exit(1);
+    }
+    const next = restHeal(run);
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
+  case 'rest-remove': {
+    const [cardId] = args;
+    if (!cardId) {
+      console.log('Usage: rest-remove <cardId>');
+      process.exit(1);
+    }
+    const { run } = load();
+    if (run.phase !== 'rest') {
+      console.log('Not currently at a rest room.');
+      process.exit(1);
+    }
+    const next = restRemoveCard(run, cardId);
+    if (next === run) {
+      console.log(`No card with id ${cardId} in the deck.`);
+      process.exit(1);
+    }
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
   case 'door': {
     const [doorId] = args;
     if (!doorId) {
@@ -295,6 +342,8 @@ Commands:
   quake <cardId>                          play a Quake card (unlimited plays this turn)
   reward <cardIndex>                      pick a reward card (0-2) after clearing a room, before the door choice
   reward-pass                             decline every offered reward and proceed to the door choice
+  rest-heal                               at a rest room, restore HP instead of removing a card
+  rest-remove <cardId>                    at a rest room, permanently remove a card instead of resting
   door <doorId>                           pick a door after clearing a room
   help                                    this message
 

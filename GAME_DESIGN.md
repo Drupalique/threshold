@@ -6,7 +6,7 @@ A snapshot of how the prototype actually works today, as one document you can re
 
 ## 1. Premise and run structure
 
-A single-player roguelike run: a linear sequence of up to `RUN_MAX_DEPTH` (**10**) rooms. Each room is cleared through a set-collection combat round. Clearing a non-final room offers a reward (a card added to your deck), then a binary door choice for the next room. No backtracking, no branch preview beyond the two doors in front of you.
+A single-player roguelike run: a linear sequence of up to `RUN_MAX_DEPTH` (**10**) rooms. Most rooms are cleared through a set-collection combat round; a door occasionally leads to a **rest room** instead (§6) — a non-combat stop that heals the player or lets them remove a card from their deck. Clearing a non-final combat room offers a reward (a card added to your deck), then a binary door choice for the next room; a rest room skips the reward and goes straight to the next door choice. No backtracking, no branch preview beyond the two doors in front of you.
 
 The run ends when either:
 - **Player HP reaches 0** (`run-over`), or
@@ -155,11 +155,22 @@ The very first room is generated directly, with no door choice involved. After a
 
 Choosing a door discards the other door and its room entirely — no backtracking, no preview. Both candidate rooms for a pair are generated speculatively up front (each wrapped in a `BranchRoot`, referenced by id rather than embedded inline, so a future multi-depth/convergent-node system could be layered on without a rewrite) — only the chosen one survives.
 
+### Rest rooms
+
+Each of a door pair's two candidate rooms independently rolls `REST_ROOM_RATIO` (**15%**) to be a rest room (`RestRoomInstance`, `types/room.ts`) instead of a combat room (`roomGenerator.ts`'s `generateRestRoom`, called from `doorGenerator.ts`) — never on the floor `RUN_MAX_DEPTH` room, which is always the guaranteed elite boss (§3), and never as the very first room (which is generated directly, no door involved). A rest room has no table, no enemies, no `RoomParams` at all — choosing a door into one (`runEngine.ts`'s `chooseDoor`) sets `RunState.phase` to `'rest'` with `combat: null`, rendered by `RestScreen.tsx`.
+
+At a rest room the player picks **exactly one** of two mutually exclusive options (StS-style campfire), each immediately resolving the room and proceeding straight to the next door choice — no reward is offered either way, unlike clearing a combat room:
+
+- **Rest** (`runEngine.ts`'s `restHeal`) — restores `REST_HEAL_PCT` (**30%**) of `playerHPMax`, rounded, capped at `playerHPMax`. Still a legal (if wasted) choice at full HP, rather than forcing a removal on a player who doesn't want one.
+- **Remove a card** (`restRemoveCard`) — permanently deletes one chosen card from `run.deck` by its id. The only way cards ever leave the persistent deck; it only ever grows otherwise (§5).
+
+A rest room's door tags are deliberately uncorrelated noise (`doorGenerator.ts`'s `trueTagsForRoom`) rather than a reliable "this door is safe" tell — same fallback an untyped-suit combat room's color already gets. Distinguishing rest from combat at the door screen is a possible follow-up, not implemented.
+
 ---
 
 ## 7. Player state and win/loss
 
-- **HP**: starts and caps at `PLAYER_HP_MAX` (**30**), carries across rooms within a run. There is currently no source of healing outside combat itself (a Grace claim, playable by the player or, symmetrically, by an enemy healing itself) — no room, door, or reward restores HP between fights. Combined with `ENEMY_COUNT_WEIGHTS_LATE` pushing 3-enemy rooms late-game and the new floor-10 boss (§3), HP is a strictly depleting resource across a run with no in-run way to recover lost ground; see §11's proposed rest room.
+- **HP**: starts and caps at `PLAYER_HP_MAX` (**30**), carries across rooms within a run. The only sources of healing are a Grace claim in combat (player or, symmetrically, an enemy healing itself) and a rest room's Rest option (§6) — the latter is probabilistic (`REST_ROOM_RATIO`, not guaranteed every run) and optional even when offered (exclusive with removing a card), so HP is still a mostly-depleting resource across a run, just no longer a strictly one-way one.
 - **Guard**: banked via Ward plays; absorbs incoming HP loss; **persists indefinitely** until it actually absorbs damage — it no longer force-resets at the end of every enemy phase.
 - **Statuses**: Weaken/Strength/Poison stacks, decaying 1/turn.
 - Death (`playerHP <= 0`) ends the run immediately; clearing the 10th room wins it.
@@ -197,6 +208,8 @@ BASIC_RIDER_AMOUNT = 1     (src/config/specialCards.ts -- every plain card's rid
 RIDER_AMOUNT = 3           (src/config/specialCards.ts -- every named special card's rider)
 
 DOOR_CORRELATION_RATE = 0.75
+REST_ROOM_RATIO = 0.15    (per door candidate, never on the RUN_MAX_DEPTH room)
+REST_HEAL_PCT = 0.3       (of playerHPMax, rounded, capped at max)
 RUN_MAX_DEPTH = 10
 STARTER_DECK = 19 cards (3×4 threat suits, 2×Grace, 2×Ward, 1 each Hex/Venom/Vigor)
 
@@ -207,22 +220,22 @@ STARTER_DECK = 19 cards (3×4 threat suits, 2×Grace, 2×Ward, 1 each Hex/Venom/
 
 ## 9. Playtest tooling
 
-`scripts/playtest.ts` (interactive CLI, one command per decision) and `scripts/playtest-sim.ts` (batch simulator with a scored heuristic bot, plus an optional `PLAYTEST_BOT=llm` mode via `scripts/llmBot.ts`) both drive the real engine directly — no UI, no mocking. They're excluded from `tsconfig`'s `include` (they're Node scripts, not app code), so `npx tsc -b` doesn't typecheck them; verify changes to them by actually running `npx tsx scripts/playtest.ts new` / `npx tsx scripts/playtest-sim.ts` rather than trusting the main build. No decay, feed, or fixed-pattern concepts remain in either script — they were fully removed along with the mechanics themselves, not left as dead branches.
+`scripts/playtest.ts` (interactive CLI, one command per decision) and `scripts/playtest-sim.ts` (batch simulator with a scored heuristic bot, plus an optional `PLAYTEST_BOT=llm` mode via `scripts/llmBot.ts`) both drive the real engine directly — no UI, no mocking. They're excluded from `tsconfig`'s `include` (they're Node scripts, not app code), so `npx tsc -b` doesn't typecheck them; verify changes to them by actually running `npx tsx scripts/playtest.ts new` / `npx tsx scripts/playtest-sim.ts` rather than trusting the main build. No decay, feed, or fixed-pattern concepts remain in either script — they were fully removed along with the mechanics themselves, not left as dead branches. The CLI's `rest-heal`/`rest-remove <cardId>` commands and the sim's `pickRestAction` heuristic (heal whenever HP is missing, otherwise remove a card from the deck's most-overrepresented suit) drive the rest-room phase (§6) the same way `reward`/`door` and `pickReward`/`pickDoor` already drive theirs.
 
 ## 10. Where the design is shakiest right now
 
-- The **persistent deck's suit-diversity gap** (§5) hasn't been addressed — door color signaling exists but nothing in the UI or a decision-maker actually steers reward/door picks toward suits already in the deck.
+- The **persistent deck's suit-diversity gap** (§5) is now only partially addressed — a rest room's card-removal option (§6) lets a player thin the deck, but it's probabilistic (`REST_ROOM_RATIO`) and nothing yet steers *which* suit to cut toward what a given room actually deals; door color signaling still exists but nothing in the UI or a decision-maker uses it for reward/door/removal picks.
 - Enemy stat-block magnitudes, enemy-def selection weighting (uniform among eligible defs, not biased toward harder ones as floors deepen), and the enemy AI's scoring weights are all first-cut numbers, not balance-tested.
-- **No in-run HP recovery** (§7) — the player's HP bar only ever goes down (barring an in-combat Grace claim) across all 10 rooms. This is a known, currently-unaddressed design gap; §11 proposes a rest room as the fix, not yet implemented.
-- No fresh batch-simulation data exists yet against the current table/live-hand engine — `scripts/playtest-sim.ts` runs cleanly again (see §9) but hasn't been run at scale since the rewrite, so any tuning claims need new numbers, not a revival of old ones. A quick `playtest-sim.ts` run after the floor 4-10 roster expansion (see `src/config/enemies.ts`) dropped the scored heuristic bot's win rate from 1% to 0.3% (300 runs each) — expected direction given tougher new defs, but underscores that none of this is tuned; treat every HP/deck-growth number below as a starting proposal, not a target.
+- `REST_ROOM_RATIO`/`REST_HEAL_PCT` (§6) are first-cut numbers, not balance-tested — a `playtest-sim.ts` run (300 runs, heuristic bot) after adding rest rooms moved the win rate from 0.3% to 1% and avg depth reached from 3.83 to 4.18, a small but real improvement in the expected direction; nowhere near enough data to call the numbers right.
+- No fresh batch-simulation data exists yet against the current table/live-hand engine at real scale (a few hundred runs isn't it) — `scripts/playtest-sim.ts` runs cleanly (see §9) but hasn't been run at the scale needed for confident tuning claims since the rewrite.
 
 ---
 
 ## 11. Proposed features (not yet implemented)
 
-Design directions raised in response to §10's gaps, recorded here so future work starts from an agreed plan rather than re-deriving it. None of the below exists in `src/` yet except where noted.
+Design directions raised in response to §10's gaps, recorded here so future work starts from an agreed plan rather than re-deriving it.
 
-- **Rest rooms** (the fix for the no-HP-recovery gap above) — a campfire, a fairy's cave, or similar: a non-combat room that heals the player some amount, appearing "from time to time" rather than every room (a rest room every room would trivialize attrition; never appearing at all is today's status quo). This is the biggest structural lift of the three: `RoomInstance` currently has no notion of *not* being a combat room — `roomGenerator.ts`/`doorGenerator.ts`/`initCombat` all assume a room means enemies. Implementing this cleanly likely needs a `RoomInstance.kind: 'combat' | 'rest'` (extensible to `'shop'` below), a door-generation path that sometimes points at a rest room instead of rolling `pickEnemies`, and a new phase/screen (`RunState.phase` currently has no non-combat, non-reward, non-door in-run state). How much it heals, and how often it can appear, are open balance questions once the plumbing exists.
-- **Reward pass** — done (§5): the reward screen now has a general "Pass" exit (`skipReward` in `runEngine.ts`), independent of how many/what kind of options are on offer, so it stays correct as the set of reward types below grows.
-- **Card removal as a reward option** — a reward slot (alongside the existing suit/Quake/special slots, `rewardGenerator.ts`) that lets the player remove a card from `run.deck` instead of adding one. Directly targets §5/§10's suit-diversity gap: the deck only ever grows today, so a 7-card hand drawn from an increasingly large, increasingly diverse pool gets steadily *less* likely to cluster on whatever suits a given room actually deals. Needs a deck-viewing UI the reward screen doesn't have yet (today's `RewardScreen.tsx` only ever shows the 3 offered cards, never the existing deck).
-- **Shops** — a room (or reward-adjacent) type where the player spends a resource to pick from a wider offering (cards, removals, maybe relics) rather than a free forced pick-1-of-3. The largest lift of the three: there is currently no currency/resource concept anywhere in `RunState` at all, so this depends on that being designed first (what it's earned from, whether it persists or is per-room, etc.) — treat as a follow-on once rest rooms have proven out the "non-combat room" plumbing above, not something to build in parallel with it.
+- **Rest rooms** — done (§6): a `RestRoomInstance` room kind, a `'rest'` run phase, and `RestScreen.tsx` offering the exclusive Rest/Remove-a-card choice, StS-style. `RoomInstance` is now a `CombatRoomInstance | RestRoomInstance` discriminated union; `initCombat` only ever takes the combat half.
+- **Reward pass** — done (§5): the reward screen has a general "Pass" exit (`skipReward` in `runEngine.ts`), independent of how many/what kind of options are on offer.
+- **Card removal** — done, but living in the rest room (§6) rather than as a reward-screen slot as originally sketched here: `restRemoveCard` lets the player permanently cut one card from `run.deck`. A reward-screen removal slot (alongside suit/Quake/special) is still a possible follow-up if rest rooms alone don't turn out to hit the suit-diversity gap often enough (§10) — the two aren't mutually exclusive.
+- **Shops** — a room (or reward-adjacent) type where the player spends a resource to pick from a wider offering (cards, removals, maybe relics) rather than a free forced pick-1-of-3, or a free exclusive heal-or-cut. The largest remaining lift: there is currently no currency/resource concept anywhere in `RunState` at all, so this depends on that being designed first (what it's earned from, whether it persists or is per-room, etc.). Rest rooms have now proven out the "non-combat room" plumbing (`RoomInstance.kind`, a dedicated `RunState.phase`, a dedicated screen) a shop room would reuse the same shape of.

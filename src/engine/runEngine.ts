@@ -6,7 +6,7 @@ import { generateRoom } from './roomGenerator';
 import { generateDoorPair } from './doorGenerator';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
 import { generateRewardOptions } from './rewardGenerator';
-import { PLAYER_HP_MAX, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
+import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
 
 export function createNewRun(seed: number): RunState {
   return {
@@ -108,8 +108,8 @@ export function chooseReward(run: RunState, cardId: string): RunState {
  * "I'm done here" exit from the reward phase. Deliberately screen-level
  * rather than a per-option decline: today's reward phase is a single
  * pick-one-of-N card offer, but it's designed to stay correct once the
- * phase can offer other optional things (a card-removal slot, a shop, etc,
- * see GAME_DESIGN.md's proposed-features section) -- passing always just
+ * phase can offer other optional things later (see GAME_DESIGN.md's
+ * proposed-features section) -- passing always just
  * means "proceed with whatever I've already taken," never a specific
  * card's own opt-out.
  */
@@ -128,14 +128,49 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
   // Only the chosen branch root survives -- the unchosen door and its
   // subtree are discarded, making "no backtracking, no preview" structural.
   const branchRootMap: Record<string, BranchRoot> = { [branchRoot.id]: branchRoot };
-  const combat = initCombat(branchRoot.room, run.rng, run.playerHP, run.playerHPMax, run.deck);
-
-  return {
+  const base = {
     ...run,
-    phase: 'combat',
     branchRoots: branchRootMap,
     currentBranchRootId: branchRoot.id,
     currentDoors: null,
-    combat,
   };
+
+  if (branchRoot.room.kind === 'rest') {
+    return { ...base, phase: 'rest' as const, combat: null };
+  }
+
+  const combat = initCombat(branchRoot.room, run.rng, run.playerHP, run.playerHPMax, run.deck);
+  return { ...base, phase: 'combat' as const, combat };
+}
+
+/**
+ * Shared tail for both rest options -- a rest room never grants a card
+ * reward (unlike clearing a combat room), so this advances depth and goes
+ * straight to door generation, skipping the 'reward' phase entirely. Also
+ * guards the (currently unreachable, since REST_ROOM_RATIO's roll is
+ * skipped once floor >= RUN_MAX_DEPTH) case of a rest room landing on the
+ * run's last room, same defensive shape as resolveCombatEnd.
+ */
+function finishRestRoom(run: RunState): RunState {
+  const newDepth = run.depth + 1;
+  if (newDepth >= run.maxDepth) {
+    return { ...run, depth: newDepth, phase: 'run-complete' };
+  }
+  return proceedToDoors({ ...run, depth: newDepth });
+}
+
+/** Restores REST_HEAL_PCT of playerHPMax (rounded, capped at max) and leaves the rest room. Exclusive with restRemoveCard -- see RestScreen.tsx. */
+export function restHeal(run: RunState): RunState {
+  if (run.phase !== 'rest') return run;
+  const healAmount = Math.round(run.playerHPMax * REST_HEAL_PCT);
+  const playerHP = Math.min(run.playerHPMax, run.playerHP + healAmount);
+  return finishRestRoom({ ...run, playerHP });
+}
+
+/** Permanently removes one card (by its unique id) from the persistent deck and leaves the rest room. Exclusive with restHeal -- see RestScreen.tsx. */
+export function restRemoveCard(run: RunState, cardId: string): RunState {
+  if (run.phase !== 'rest') return run;
+  if (!run.deck.some((c) => c.id === cardId)) return run;
+  const deck = run.deck.filter((c) => c.id !== cardId);
+  return finishRestRoom({ ...run, deck });
 }

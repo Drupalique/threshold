@@ -39,8 +39,23 @@ export interface RoomParams {
   strengthRatio: number;
 }
 
-export interface RoomInstance {
+export interface CombatRoomInstance {
+  kind: 'combat';
   id: string;
   params: RoomParams;
   enemies: EnemyInstance[];
 }
+
+/**
+ * A campfire/fairy's-cave style rest stop -- no table, no enemies, no
+ * params. Resolved directly by runEngine's restHeal/restRemoveCard, not by
+ * combatEngine at all; see doorGenerator.ts's REST_ROOM_RATIO roll and
+ * runEngine.ts's chooseDoor for how a door ends up pointing at one of these
+ * instead of a CombatRoomInstance.
+ */
+export interface RestRoomInstance {
+  kind: 'rest';
+  id: string;
+}
+
+export type RoomInstance = CombatRoomInstance | RestRoomInstance;

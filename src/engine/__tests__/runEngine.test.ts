@@ -1,9 +1,39 @@
 import { describe, it, expect } from 'vitest';
-import { createNewRun, startFirstRoom, resolveCombatEnd, chooseReward, skipReward, chooseDoor } from '../runEngine';
+import {
+  createNewRun,
+  startFirstRoom,
+  resolveCombatEnd,
+  chooseReward,
+  skipReward,
+  chooseDoor,
+  restHeal,
+  restRemoveCard,
+} from '../runEngine';
 import type { RunState } from '../../types/run';
+import type { BranchRoot } from '../../types/door';
+import type { RestRoomInstance } from '../../types/room';
 
 function clearCurrentRoom(run: RunState): RunState {
   return { ...run, combat: { ...run.combat!, enemies: [], status: 'room-cleared' } };
+}
+
+/**
+ * Forces the run into the 'rest' phase deterministically, bypassing
+ * doorGenerator's RNG-dependent REST_ROOM_RATIO roll -- these tests care
+ * about restHeal/restRemoveCard's own behavior, not whether a given seed
+ * happens to roll a rest room.
+ */
+function enterRestRoom(run: RunState): RunState {
+  const restRoom: RestRoomInstance = { kind: 'rest', id: 'test-rest-room' };
+  const branchRoot: BranchRoot = { id: 'branch-test-rest-room', depth: 1, room: restRoom };
+  const doorId = 'door-test-rest-room';
+  const withDoor: RunState = {
+    ...run,
+    phase: 'door-choice',
+    branchRoots: { ...run.branchRoots, [branchRoot.id]: branchRoot },
+    currentDoors: [{ id: doorId, tags: { size: 'small', color: 'red' }, branchRootId: branchRoot.id }],
+  };
+  return chooseDoor(withDoor, doorId);
 }
 
 describe('reward flow', () => {
@@ -32,7 +62,13 @@ describe('reward flow', () => {
     expect(run.deck.length).toBe(deckSizeBefore + 1);
     expect(run.deck.some((c) => c.id === chosenId)).toBe(true);
 
-    run = chooseDoor(run, run.currentDoors![0].id);
+    // A door can now lead to a rest room (REST_ROOM_RATIO) instead of
+    // combat -- pick whichever candidate is a combat room, since that's
+    // what this test is actually exercising.
+    const combatDoor = run.currentDoors!.find(
+      (d) => run.branchRoots[d.branchRootId].room.kind === 'combat',
+    )!;
+    run = chooseDoor(run, combatDoor.id);
     const allIdsInNextRoom = new Set([
       ...run.combat!.playerHand.map((c) => c.id),
       ...run.combat!.drawPile.map((c) => c.id),
@@ -79,5 +115,73 @@ describe('reward flow', () => {
 
     expect(run.phase).toBe('run-complete');
     expect(run.rewardOptions).toBeNull();
+  });
+});
+
+describe('rest rooms', () => {
+  it('choosing a door into a rest room sets phase to rest with no combat state', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterRestRoom(run);
+
+    expect(run.phase).toBe('rest');
+    expect(run.combat).toBeNull();
+  });
+
+  it('restHeal restores REST_HEAL_PCT of max HP, capped at max, and proceeds straight to door-choice with no reward phase', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterRestRoom(run);
+    run = { ...run, playerHP: 10 };
+    const depthBefore = run.depth;
+
+    run = restHeal(run);
+
+    // REST_HEAL_PCT is 0.3 of PLAYER_HP_MAX (30) = 9, rounded.
+    expect(run.playerHP).toBe(19);
+    expect(run.phase).toBe('door-choice');
+    expect(run.rewardOptions).toBeNull();
+    expect(run.depth).toBe(depthBefore + 1);
+  });
+
+  it('restHeal never overheals past playerHPMax', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterRestRoom(run);
+    run = { ...run, playerHP: 25 };
+
+    run = restHeal(run);
+
+    expect(run.playerHP).toBe(run.playerHPMax);
+  });
+
+  it('restRemoveCard removes exactly the targeted card and proceeds to door-choice', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterRestRoom(run);
+    const targetId = run.deck[0].id;
+    const deckSizeBefore = run.deck.length;
+
+    run = restRemoveCard(run, targetId);
+
+    expect(run.deck.length).toBe(deckSizeBefore - 1);
+    expect(run.deck.some((c) => c.id === targetId)).toBe(false);
+    expect(run.phase).toBe('door-choice');
+  });
+
+  it('restRemoveCard rejects an id not in the deck, leaving the run in the rest phase', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterRestRoom(run);
+
+    const rejected = restRemoveCard(run, 'not-a-real-card');
+    expect(rejected).toBe(run);
+    expect(rejected.phase).toBe('rest');
+  });
+
+  it('restHeal and restRemoveCard are both no-ops outside the rest phase', () => {
+    const run = createNewRun(3);
+    expect(restHeal(run)).toBe(run);
+    expect(restRemoveCard(run, 'anything')).toBe(run);
   });
 });

@@ -16,7 +16,7 @@
 //
 // Usage: npx tsx scripts/playtest-sim.ts [numRuns] [startSeed]
 //        PLAYTEST_BOT=llm npx tsx scripts/playtest-sim.ts 1 1
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor } from '../src/engine/runEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor, restHeal, restRemoveCard } from '../src/engine/runEngine.ts';
 import { getLegalPlaySets, type LegalPlayTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
 import { pickLlmPlay, llmStats, type LlmChosenPlay } from './llmBot.ts';
@@ -53,6 +53,9 @@ interface Metrics {
   roomsClearedPerRun: number[];
   hpLossPerRoomCleared: number[];
   roomOutcomesByEnemyCount: Record<number, { cleared: number; died: number }>;
+  restRoomsSeen: number;
+  restHealsChosen: number;
+  restRemovesChosen: number;
 }
 
 function freshMetrics(): Metrics {
@@ -75,6 +78,9 @@ function freshMetrics(): Metrics {
     roomsClearedPerRun: [],
     hpLossPerRoomCleared: [],
     roomOutcomesByEnemyCount: {},
+    restRoomsSeen: 0,
+    restHealsChosen: 0,
+    restRemovesChosen: 0,
   };
 }
 
@@ -185,6 +191,33 @@ function pickReward(run: RunState): string {
     }
   }
   return bestId;
+}
+
+/**
+ * Rest is exclusive (heal or remove a card, never both -- see
+ * runEngine.ts's restHeal/restRemoveCard). Heals whenever there's any HP
+ * missing (never wastes the option); at full HP, thins the deck instead by
+ * removing a card from whichever suit is currently the most overrepresented
+ * -- the inverse of pickReward's avgCount comparison above.
+ */
+function pickRestAction(run: RunState): { kind: 'heal' } | { kind: 'remove'; cardId: string } {
+  if (run.playerHP < run.playerHPMax) return { kind: 'heal' };
+
+  const suitCounts = new Map<SuitId, number>();
+  for (const c of run.deck) {
+    if (c.kind !== 'creature') continue;
+    suitCounts.set(c.suit, (suitCounts.get(c.suit) ?? 0) + 1);
+  }
+  let worstCard = run.deck[0];
+  let worstCount = -Infinity;
+  for (const c of run.deck) {
+    const count = c.kind === 'creature' ? (suitCounts.get(c.suit) ?? 0) : 0;
+    if (count > worstCount) {
+      worstCount = count;
+      worstCard = c;
+    }
+  }
+  return { kind: 'remove', cardId: worstCard.id };
 }
 
 function pickDoor(run: RunState): string {
@@ -331,10 +364,22 @@ async function playRun(seed: number): Promise<void> {
   let roomsCleared = 0;
   let safety = 0;
 
-  while (run.phase === 'combat' || run.phase === 'reward' || run.phase === 'door-choice') {
+  while (run.phase === 'combat' || run.phase === 'rest' || run.phase === 'reward' || run.phase === 'door-choice') {
     if (safety++ > 400) {
       m.anomalies++;
       return;
+    }
+    if (run.phase === 'rest') {
+      m.restRoomsSeen++;
+      const action = pickRestAction(run);
+      if (action.kind === 'heal') {
+        m.restHealsChosen++;
+        run = restHeal(run);
+      } else {
+        m.restRemovesChosen++;
+        run = restRemoveCard(run, action.cardId);
+      }
+      continue;
     }
     if (run.phase === 'reward') {
       run = chooseReward(run, pickReward(run));
@@ -447,6 +492,12 @@ const report = {
       { ...o, total: o.cleared + o.died, clearRate: Number((o.cleared / (o.cleared + o.died)).toFixed(3)) },
     ]),
   ),
+  restRooms: {
+    seen: m.restRoomsSeen,
+    perRun: Number((m.restRoomsSeen / m.runs).toFixed(2)),
+    healsChosen: m.restHealsChosen,
+    removesChosen: m.restRemovesChosen,
+  },
 };
 
 console.log(JSON.stringify(report, null, 2));

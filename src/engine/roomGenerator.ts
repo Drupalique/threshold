@@ -1,4 +1,4 @@
-import type { RoomInstance, RoomParams, PoolSizeBand } from '../types/room';
+import type { CombatRoomInstance, RestRoomInstance, RoomParams, PoolSizeBand } from '../types/room';
 import type { EnemyInstance } from '../types/enemy';
 import type { SuitId } from '../types/suits';
 import type { Rng } from './rng';
@@ -108,7 +108,7 @@ function pickThreatSuits(sizeBand: PoolSizeBand, rng: Rng): SuitId[] {
   return pickDistinct(rng, THREAT_SUITS, THREAT_SUIT_COUNT_BY_SIZE_BAND[sizeBand]);
 }
 
-export function generateRoom(rng: Rng, floor: number): RoomInstance {
+export function generateRoom(rng: Rng, floor: number): CombatRoomInstance {
   const id = `room-${roomCounter++}`;
   const enemies = pickEnemies(floor, id, rng);
 
@@ -141,5 +141,11 @@ export function generateRoom(rng: Rng, floor: number): RoomInstance {
     strengthRatio: STRENGTH_SUIT_RATIO,
   };
 
-  return { id, params, enemies };
+  return { kind: 'combat', id, params, enemies };
+}
+
+/** A campfire/fairy's-cave rest stop -- no table, no enemies, nothing to roll besides an id. See doorGenerator.ts's REST_ROOM_RATIO. */
+export function generateRestRoom(): RestRoomInstance {
+  const id = `room-${roomCounter++}`;
+  return { kind: 'rest', id };
 }

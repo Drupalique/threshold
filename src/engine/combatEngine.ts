@@ -1,7 +1,7 @@
 import type { SuitId, SuitCategory } from '../types/suits';
 import type { Card, CreatureCard } from '../types/cards';
 import type { EnemyInstance } from '../types/enemy';
-import type { RoomInstance } from '../types/room';
+import type { CombatRoomInstance } from '../types/room';
 import type { StatusBag, StatusId } from '../types/status';
 import type {
   CombatAction,
@@ -79,7 +79,7 @@ function updateEnemy(
 // --- Round initialization ---------------------------------------------
 
 export function initCombat(
-  room: RoomInstance,
+  room: CombatRoomInstance,
   rng: Rng,
   playerHP: number,
   playerHPMax: number,

@@ -184,6 +184,21 @@ export const WEAKEN_PCT_PER_STACK = 0.1;
 
 export const DOOR_CORRELATION_RATE = 0.75;
 
+// Independent per-door-candidate odds that a door leads to a rest room
+// (campfire/fairy's cave) instead of a combat room -- rolled separately for
+// each of the two doors in a pair (doorGenerator.ts), never on the floor
+// RUN_MAX_DEPTH room (that's always the guaranteed elite boss, see
+// config/enemies.ts). First-cut number: "from time to time" per the design
+// discussion, not balance-tested -- at 0.15 across the 9 door-pair rolls in
+// a full run (floors 2..RUN_MAX_DEPTH), a run sees on average ~2.7 rest-room
+// doors offered (not guaranteed taken).
+export const REST_ROOM_RATIO = 0.15;
+
+// Fraction of playerHPMax a rest room's "Rest" option restores (rounded,
+// capped at playerHPMax) -- the fix for the no-in-run-HP-recovery gap
+// (GAME_DESIGN.md §7/§10). First-cut number, not balance-tested.
+export const REST_HEAL_PCT = 0.3;
+
 // --- Run / persistent deck ----------------------------------------------
 
 export const RUN_MAX_DEPTH = 10;

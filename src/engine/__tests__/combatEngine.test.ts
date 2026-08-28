@@ -4,7 +4,7 @@ import type { Rng } from '../rng';
 import { initCombat, applyCombatAction, getLegalPlaySets, requiresEnemyTarget } from '../combatEngine';
 import { chooseEnemyPlay } from '../enemyAI';
 import { enemyDefById } from '../../config/enemies';
-import type { RoomInstance } from '../../types/room';
+import type { CombatRoomInstance } from '../../types/room';
 import type { EnemyInstance } from '../../types/enemy';
 import type { CombatState, TableCard } from '../../types/combat';
 import type { Card, CreatureCard } from '../../types/cards';
@@ -27,8 +27,9 @@ function makeEnemy(overrides: Partial<EnemyInstance> = {}): EnemyInstance {
   };
 }
 
-function makeRoom(overrides: Partial<RoomInstance> = {}): RoomInstance {
+function makeRoom(overrides: Partial<CombatRoomInstance> = {}): CombatRoomInstance {
   return {
+    kind: 'combat',
     id: 'test-room',
     params: {
       tableDealSize: 4,
@@ -67,7 +68,7 @@ const DEFAULT_HAND: Card[] = [
 // drawPile/discardPile/table stay internally consistent for anything a test
 // doesn't explicitly override.
 function makeCombat(
-  room: RoomInstance,
+  room: CombatRoomInstance,
   rng: Rng,
   playerHP: number,
   playerHPMax: number,
