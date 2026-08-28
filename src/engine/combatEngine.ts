@@ -164,6 +164,34 @@ export function getLegalPlaySets(state: CombatState): LegalPlayTarget[] {
   return targets;
 }
 
+export interface PlayPreview {
+  category: SuitCategory;
+  tableCountAfterPlay: number;
+  /** This play's own category effect (damage/heal/Guard/stacks), Strength/Weaken already folded in for a threat play -- exactly what performPlay would apply, never a separate estimate. */
+  magnitude: number;
+  strengthStacks: number;
+  weakenStacks: number;
+  /** Combined rider bonus from every selected card (see applyRiders) -- flat, never touched by Strength/Weaken, added on top of `magnitude` once the play actually resolves. */
+  bonusDamage: number;
+  bonusGuard: number;
+}
+
+/** Previews exactly what PLAY_SET would compute for these hand cards without mutating state -- built from the same computeMagnitude/computeRiderTotals performPlay itself uses, so a UI preview can never drift from the real resolution. Player-only: enemies don't need a pre-play preview since chooseEnemyPlay commits directly. */
+export function previewPlayerPlay(state: CombatState, suit: SuitId, handCardIds: string[]): PlayPreview {
+  const category = suitCategory(suit);
+  const tableCountBefore = countTableSetSize(state.table, suit);
+  const { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks } = computeMagnitude(
+    category,
+    handCardIds.length,
+    tableCountBefore,
+    state.playerStatuses,
+  );
+  const idSet = new Set(handCardIds);
+  const cards = state.playerHand.filter((c): c is CreatureCard => idSet.has(c.id) && c.kind === 'creature');
+  const { bonusDamage, bonusGuard } = computeRiderTotals(cards);
+  return { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, bonusDamage, bonusGuard };
+}
+
 function isLegalPlay(
   state: CombatState,
   suit: SuitId,
@@ -228,6 +256,42 @@ function actorNameOf(state: CombatState, actor: Actor): string {
  * hit the player -- enemies never target each other. boon/guard/strength
  * always self-target whoever played them.
  */
+/**
+ * The magnitude formula shared by every play, real or previewed: handCount x
+ * (table cards of `category` visible before this play, from every owner
+ * combined, PLUS the cards this play itself adds) -- with Strength/Weaken
+ * folded in for a *threat* play only (see withStrength/withWeaken), exactly
+ * mirroring performPlay's own math so a UI preview built from this can never
+ * drift from what actually resolves.
+ */
+function computeMagnitude(
+  category: SuitCategory,
+  handCount: number,
+  tableCountBefore: number,
+  actorStatuses: StatusBag,
+): { tableCountAfterPlay: number; magnitude: number; strengthStacks: number; weakenStacks: number } {
+  const isThreat = category === 'threat';
+  const strengthStacks = isThreat ? stacksOf(actorStatuses, 'strength') : 0;
+  const weakenStacks = isThreat ? stacksOf(actorStatuses, 'weaken') : 0;
+  const tableCountAfterPlay = tableCountBefore + handCount;
+  const boostedTotal = isThreat ? withStrength(tableCountAfterPlay, actorStatuses) : tableCountAfterPlay;
+  const rawMagnitude = boostedTotal * handCount;
+  const magnitude = isThreat ? withWeaken(rawMagnitude, actorStatuses, WEAKEN_PCT_PER_STACK) : rawMagnitude;
+  return { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks };
+}
+
+/** Sums the rider each of `cards` fires (see applyRiders) into the same combined bonus-damage/bonus-guard totals a resolving play would apply -- shared by the real resolver and any preview built ahead of a play. */
+function computeRiderTotals(cards: CreatureCard[]): { bonusDamage: number; bonusGuard: number } {
+  let bonusDamage = 0;
+  let bonusGuard = 0;
+  for (const card of cards) {
+    const rider = riderForCard(card, suitCategory(card.suit));
+    if (rider.kind === 'bonus-damage') bonusDamage += rider.amount;
+    else bonusGuard += rider.amount;
+  }
+  return { bonusDamage, bonusGuard };
+}
+
 function performPlay(
   state: CombatState,
   actor: Actor,
@@ -236,15 +300,14 @@ function performPlay(
   handCardIds: string[],
 ): CombatState {
   const category = suitCategory(suit);
-  const isThreat = category === 'threat';
   const actorStatuses = actorStatusesOf(state, actor);
-  const strengthStacks = isThreat ? stacksOf(actorStatuses, 'strength') : 0;
-  const weakenStacks = isThreat ? stacksOf(actorStatuses, 'weaken') : 0;
   const tableCountBefore = countTableSetSize(state.table, suit);
-  const tableCountAfterPlay = tableCountBefore + handCardIds.length;
-  const boostedTotal = isThreat ? withStrength(tableCountAfterPlay, actorStatuses) : tableCountAfterPlay;
-  const rawMagnitude = boostedTotal * handCardIds.length;
-  const magnitude = isThreat ? withWeaken(rawMagnitude, actorStatuses, WEAKEN_PCT_PER_STACK) : rawMagnitude;
+  const { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks } = computeMagnitude(
+    category,
+    handCardIds.length,
+    tableCountBefore,
+    actorStatuses,
+  );
 
   const ownerId = ownerIdOf(actor);
   const playedIdSet = new Set(handCardIds);
@@ -400,13 +463,7 @@ function applyRiders(
   let next = state;
   const actorName = actorNameOf(state, actor);
 
-  let bonusDamage = 0;
-  let bonusGuard = 0;
-  for (const card of playedCards) {
-    const rider = riderForCard(card, suitCategory(card.suit));
-    if (rider.kind === 'bonus-damage') bonusDamage += rider.amount;
-    else bonusGuard += rider.amount;
-  }
+  const { bonusDamage, bonusGuard } = computeRiderTotals(playedCards);
 
   // Single-card plays keep the flavorful source name (a named special's own
   // name, or the plain suit's name) in the log line; multi-card plays fold

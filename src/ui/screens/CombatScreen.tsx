@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRun } from '../../state/runContextObject';
 import type { Card } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { getLegalPlaySets, requiresEnemyTarget } from '../../engine/combatEngine';
+import { getLegalPlaySets, requiresEnemyTarget, previewPlayerPlay } from '../../engine/combatEngine';
 import { SUIT_DEFINITIONS, TURN_ANIMATION_DELAY_MS } from '../../config/constants';
 import { useLogPlayback } from '../hooks/useLogPlayback';
 import { MeterBar } from '../components/MeterBar';
@@ -131,13 +131,13 @@ export function CombatScreen() {
     dispatchCombat({ type: 'PLAYER_PASS' });
   }
 
-  // tableSetSize is a property of the suit's table pile, not of any one
-  // target -- every enemy offered for a threat suit shares the same value
-  // (see getLegalPlaySets), so this must not filter by target or it reads
-  // as 0 while the player is still picking who to target.
-  const tableSetSize = selectedSuit
-    ? (legalTargets.find((t) => t.suit === selectedSuit)?.tableSetSize ?? 0)
-    : 0;
+  // Built from the same magnitude/rider math performPlay itself uses (see
+  // previewPlayerPlay), so this can never drift from what actually resolves
+  // -- includes Strength/Weaken (threat plays only) and every selected
+  // card's rider bonus, not just the base hand-count x table-count product.
+  const playPreview = selectedSuit && selectedIds.size > 0
+    ? previewPlayerPlay(combat, selectedSuit, Array.from(selectedIds))
+    : null;
   const hasChosenTarget = suitNeedsNoTarget || selectedTargetInstanceId !== null;
   const hasPlaysLeft = combat.unlimitedPlaysThisTurn || combat.playsRemaining > 0;
   const canPlay =
@@ -195,8 +195,8 @@ export function CombatScreen() {
             <PlayControls
               isPlayerTurn={canAct}
               selectedSuitName={selectedSuit ? SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.name : null}
-              tableSetSize={tableSetSize}
               selectedCount={selectedIds.size}
+              preview={playPreview}
               canPlay={canPlay}
               hasAnyLegalPlay={legalTargets.length > 0}
               needsTarget={needsTarget}
