@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createNewRun, startFirstRoom, resolveCombatEnd, chooseReward, chooseDoor } from '../runEngine';
+import { createNewRun, startFirstRoom, resolveCombatEnd, chooseReward, skipReward, chooseDoor } from '../runEngine';
 import type { RunState } from '../../types/run';
 
 function clearCurrentRoom(run: RunState): RunState {
@@ -50,6 +50,25 @@ describe('reward flow', () => {
     const rejected = chooseReward(run, 'not-a-real-option');
     expect(rejected).toBe(run);
     expect(rejected.deck.length).toBe(deckSizeBefore);
+  });
+
+  it('lets the player pass on every offered reward, leaving the deck untouched and still proceeding to door-choice', () => {
+    let run = createNewRun(7);
+    run = startFirstRoom(run);
+    run = resolveCombatEnd(clearCurrentRoom(run));
+    const deckSizeBefore = run.deck.length;
+
+    run = skipReward(run);
+
+    expect(run.phase).toBe('door-choice');
+    expect(run.rewardOptions).toBeNull();
+    expect(run.deck.length).toBe(deckSizeBefore);
+    expect(run.currentDoors).not.toBeNull();
+  });
+
+  it('ignores skipReward outside the reward phase', () => {
+    const run = createNewRun(7);
+    expect(skipReward(run)).toBe(run);
   });
 
   it('skips the reward step entirely when the cleared room was the run\'s last one', () => {

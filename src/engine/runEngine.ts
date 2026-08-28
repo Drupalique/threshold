@@ -103,6 +103,21 @@ export function chooseReward(run: RunState, cardId: string): RunState {
   return proceedToDoors({ ...run, deck: [...run.deck, chosen], rewardOptions: null });
 }
 
+/**
+ * Leaves the deck untouched and proceeds to door generation -- the general
+ * "I'm done here" exit from the reward phase. Deliberately screen-level
+ * rather than a per-option decline: today's reward phase is a single
+ * pick-one-of-N card offer, but it's designed to stay correct once the
+ * phase can offer other optional things (a card-removal slot, a shop, etc,
+ * see GAME_DESIGN.md's proposed-features section) -- passing always just
+ * means "proceed with whatever I've already taken," never a specific
+ * card's own opt-out.
+ */
+export function skipReward(run: RunState): RunState {
+  if (run.phase !== 'reward') return run;
+  return proceedToDoors({ ...run, rewardOptions: null });
+}
+
 export function chooseDoor(run: RunState, doorId: string): RunState {
   if (run.phase !== 'door-choice' || !run.currentDoors) return run;
   const chosen = run.currentDoors.find((d) => d.id === doorId);

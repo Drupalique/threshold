@@ -2,7 +2,7 @@ import { useRun } from '../../state/runContextObject';
 import { CardChip } from '../components/CardChip';
 
 export function RewardScreen() {
-  const { state, chooseReward } = useRun();
+  const { state, chooseReward, skipReward } = useRun();
   const options = state.rewardOptions ?? [];
 
   return (
@@ -15,6 +15,12 @@ export function RewardScreen() {
           </div>
         ))}
       </div>
+      {/* Screen-level pass, not a per-card decline -- every reward on offer
+          here is optional, and this is the one exit once you've taken
+          whatever (if anything) you want. See runEngine.ts's skipReward. */}
+      <button type="button" className="reward-pass-button" onClick={skipReward}>
+        Pass
+      </button>
       <p className="reward-deck-size">Deck size: {state.deck.length}</p>
     </div>
   );

@@ -8,7 +8,7 @@
 // Usage: npx tsx scripts/playtest.ts <command> [args...]
 // Run `npx tsx scripts/playtest.ts help` for the command list.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor } from '../src/engine/runEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, chooseDoor } from '../src/engine/runEngine.ts';
 import { createRngFromState } from '../src/engine/rng.ts';
 import { getLegalPlaySets, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
@@ -258,6 +258,18 @@ switch (cmd) {
     break;
   }
 
+  case 'reward-pass': {
+    const { run } = load();
+    if (run.phase !== 'reward') {
+      console.log('Not currently at a reward choice.');
+      process.exit(1);
+    }
+    const next = skipReward(run);
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
   case 'door': {
     const [doorId] = args;
     if (!doorId) {
@@ -282,6 +294,7 @@ Commands:
   pass                                    end your turn without playing
   quake <cardId>                          play a Quake card (unlimited plays this turn)
   reward <cardIndex>                      pick a reward card (0-2) after clearing a room, before the door choice
+  reward-pass                             decline every offered reward and proceed to the door choice
   door <doorId>                           pick a door after clearing a room
   help                                    this message
 

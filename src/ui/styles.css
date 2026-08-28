@@ -533,9 +533,13 @@ button {
   font-size: 1.05rem;
 }
 
+.reward-pass-button {
+  margin-top: 1.5rem;
+}
+
 .reward-deck-size {
   color: #999;
-  margin-top: 2rem;
+  margin-top: 1rem;
 }
 
 /* --- Doors --- */
