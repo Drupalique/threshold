@@ -149,35 +149,23 @@ export function CombatScreen() {
 
   return (
     <div className="combat-screen">
-      <div className="combat-enemies">
+      <div className="combat-combatants">
         <EnemyPanel
           enemies={combat.enemies}
           targetableInstanceIds={targetableInstanceIds}
           selectedTargetInstanceId={selectedTargetInstanceId}
           onSelectTarget={setSelectedTargetInstanceId}
         />
-      </div>
-
-      <div
-        className={[
-          'combat-turn-indicator',
-          combat.status === 'player-dead' ? 'combat-turn-indicator--dead' : '',
-          combat.status === 'room-cleared' ? 'combat-turn-indicator--cleared' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        {combat.status === 'player-dead' && 'You have fallen...'}
-        {combat.status === 'room-cleared' && 'Room cleared!'}
-        {combat.status === 'active' &&
-          `Turn ${combat.turnNumber} -- ${isPlaying ? 'Resolving...' : isPlayerTurn ? 'Your turn' : "Enemies' turn"}`}
-        {combat.status === 'active' && isPlayerTurn && !isPlaying && (
-          <span className="combat-plays-remaining">
-            {combat.unlimitedPlaysThisTurn
-              ? ' -- Unlimited plays!'
-              : ` -- ${combat.playsRemaining} play${combat.playsRemaining === 1 ? '' : 's'} left`}
-          </span>
-        )}
+        <div className="player-panel">
+          <h3>You</h3>
+          <div className="enemy-card player-card meter-with-badge">
+            <MeterBar label="HP" value={displayedPlayerHP} max={displayedPlayerHPMax} color="#27ae60" />
+            <div className="enemy-card-badges">
+              {displayedPlayerGuard > 0 && <span className="enemy-guard-badge">Guard {displayedPlayerGuard}</span>}
+              <StatusBadges statuses={combat.playerStatuses} />
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="combat-main">
@@ -209,12 +197,6 @@ export function CombatScreen() {
         <div className="combat-column combat-column--log">
           <TurnLogFeed log={visibleLog} />
         </div>
-      </div>
-
-      <div className="combat-player-stats meter-with-badge">
-        <MeterBar label="Player HP" value={displayedPlayerHP} max={displayedPlayerHPMax} color="#27ae60" />
-        {displayedPlayerGuard > 0 && <div className="guard-badge">Guard {displayedPlayerGuard}</div>}
-        <StatusBadges statuses={combat.playerStatuses} />
       </div>
     </div>
   );

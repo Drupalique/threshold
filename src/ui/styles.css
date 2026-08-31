@@ -41,14 +41,24 @@ button {
 
 /* --- Meters --- */
 
-.combat-enemies {
+.combat-combatants {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   margin-bottom: 0.75rem;
 }
 
-.combat-player-stats {
-  margin-top: 1.5rem;
-  padding-top: 1rem;
-  border-top: 1px solid #2a2a36;
+.combat-combatants .enemy-panel {
+  flex: 1 1 auto;
+}
+
+.player-panel {
+  flex: 0 0 auto;
+}
+
+.player-card {
+  border-color: #27ae60;
 }
 
 .meter-label {
@@ -72,17 +82,6 @@ button {
 
 .meter-with-badge {
   position: relative;
-}
-
-.guard-badge {
-  display: inline-block;
-  margin-top: 0.3rem;
-  padding: 0.1rem 0.5rem;
-  border-radius: 4px;
-  background: #16a085;
-  color: white;
-  font-size: 0.75rem;
-  font-weight: 600;
 }
 
 /* Generic status-effect stack badges -- shared by the player's meter row
@@ -210,27 +209,24 @@ button {
   font-size: 0.75rem;
 }
 
-.combat-turn-indicator {
-  text-align: center;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  color: #ccc;
-}
-
-.combat-turn-indicator--dead {
-  color: #e74c3c;
-}
-
-.combat-turn-indicator--cleared {
-  color: #2ecc71;
-}
-
 .combat-plays-remaining {
   color: #f1c40f;
   font-weight: 500;
 }
 
 /* --- Combat layout --- */
+
+/* Every section heading on the battle screen (Enemies, You, Table, Your
+   Hand, Log) rides the unstyled browser h3 default otherwise -- ~1em font
+   plus 1em top/bottom margins, which reads as a big airy block next to the
+   tight .enemy-card-name treatment. Flattened to match that same compact
+   look so no single section balloons past the others by default. */
+.combat-screen h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #ccc;
+}
 
 .combat-main {
   display: grid;
@@ -241,7 +237,7 @@ button {
 .combat-column {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.9rem;
 }
 
 .combat-column--log {
@@ -343,8 +339,16 @@ button {
   border-radius: 8px;
   padding: 0.5rem 0.6rem;
   border: 1px solid #2a2a3a;
-  flex: 1 1 200px;
   min-width: 0;
+}
+
+/* The 200px flex-basis is a column-width hint for lanes sitting side by
+   side in the (row-direction) enemies strip -- it must NOT apply to the
+   solo room/player lanes, since their parent section is column-direction,
+   where the same flex-basis would set a 200px MIN-HEIGHT instead and pad
+   every empty lane out with dead space. */
+.table-board-section--enemies .table-lane {
+  flex: 1 1 200px;
 }
 
 .table-lane--room {
@@ -795,8 +799,24 @@ button {
 
 .tab-bar {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
   margin-bottom: 1.5rem;
+}
+
+.topbar-turn-status {
+  margin-left: auto;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #ccc;
+}
+
+.topbar-turn-status--dead {
+  color: #e74c3c;
+}
+
+.topbar-turn-status--cleared {
+  color: #2ecc71;
 }
 
 .tab-button {
