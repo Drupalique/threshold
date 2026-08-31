@@ -1,5 +1,5 @@
 import type { PlayPreview } from '../../engine/combatEngine';
-import { WEAKEN_PCT_PER_STACK } from '../../config/constants';
+import { WEAKEN_PCT } from '../../config/constants';
 
 interface PlayControlsProps {
   isPlayerTurn: boolean;
@@ -49,9 +49,7 @@ function describePreview(preview: PlayPreview, selectedCount: number): string {
   const resourceLabel = RESOURCE_LABEL[category];
   const buffNotes = [
     strengthStacks > 0 ? `+${strengthStacks} from Strength` : null,
-    weakenStacks > 0
-      ? `weakened -${Math.round(Math.min(1, weakenStacks * WEAKEN_PCT_PER_STACK) * 100)}%`
-      : null,
+    weakenStacks > 0 ? `weakened -${Math.round(WEAKEN_PCT * 100)}%` : null,
   ].filter((n): n is string => n !== null);
   const buffSuffix = buffNotes.length > 0 ? ` (${buffNotes.join(', ')})` : '';
 

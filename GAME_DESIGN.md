@@ -126,9 +126,9 @@ Duplicate enemies are allowed and each gets its own independent hand/deck cycle.
 
 Weaken, Strength, and Poison are unified as **stack counts** on a shared `StatusBag`, held by the player or any enemy, resolved by the same functions regardless of holder:
 
-- **Weaken** — knocks `WEAKEN_PCT_PER_STACK` (10%) off an outgoing *threat* play's magnitude per stack held by the entity dealing it, capped at 100%.
+- **Weaken** — knocks a flat `WEAKEN_PCT` (25%) off an outgoing *threat* play's magnitude while the entity dealing it holds any Weaken stacks at all. The stack count is duration only (how many of the dealer's own turns the cut keeps applying), not intensity — 1 stack and 10 stacks cut the same 25%, so damage can never be reduced to 0 by Weaken alone.
 - **Strength** — adds +1 flat to the table-count term per stack, before the hand-card multiplier, on a *threat* play only — for a player threat play this is `(tableCount + handCount + strength) × handCount`, so it's disproportionately valuable on a small table count.
-- **Poison** — deals its current stack count as damage to its own holder, then decays.
+- **Poison** — deals its current stack count as damage to its own holder, then decays. Unlike an ordinary threat/attack hit, Poison damage ignores Guard entirely and always lands straight on HP.
 
 All three decay by exactly 1 stack at the true end of the holder's own turn (never mid-turn). The player inflicts these via three dedicated suits: **Hex** (Weaken, targeted like threat), **Venom** (Poison, targeted), **Vigor** (Strength, self-targeted like a boon). None of the three get a bonus from the actor's own Strength/Weaken (same exemption boon/guard plays get) — inflicting a status isn't itself treated as an "attack."
 
@@ -178,7 +178,7 @@ A rest room's door tags are deliberately uncorrelated noise (`runTree.ts`'s `tru
 ## 7. Player state and win/loss
 
 - **HP**: starts and caps at `PLAYER_HP_MAX` (**30**), carries across rooms within a run. The only sources of healing are a Grace claim in combat (player or, symmetrically, an enemy healing itself) and a rest room's Rest option (§6) — the latter is probabilistic (`REST_ROOM_RATIO`, not guaranteed every run) and optional even when offered (exclusive with removing a card), so HP is still a mostly-depleting resource across a run, just no longer a strictly one-way one.
-- **Guard**: banked via Ward plays; absorbs incoming HP loss; **persists indefinitely** until it actually absorbs damage — it no longer force-resets at the end of every enemy phase.
+- **Guard**: banked via Ward plays; absorbs incoming HP loss; **persists indefinitely** until it actually absorbs damage — it no longer force-resets at the end of every enemy phase. Poison ticks bypass Guard entirely (§4).
 - **Statuses**: Weaken/Strength/Poison stacks, decaying 1/turn.
 - Death (`playerHP <= 0`) ends the run immediately; clearing the 10th room wins it.
 
@@ -205,7 +205,7 @@ ON_SUIT_RATIO = 0.45      BOON_SUIT_RATIO = 0.12    GUARD_SUIT_RATIO = 0.08
 WEAKEN/POISON/STRENGTH_SUIT_RATIO = 0.08 each
 
 PLAYER_HP_MAX = 30
-WEAKEN_PCT_PER_STACK = 0.1
+WEAKEN_PCT = 0.25
 
 PLAYS_PER_TURN_BASE = 2
 QUAKE_REWARD_RATIO = 0.08         REWARD_OPTION_COUNT = 3

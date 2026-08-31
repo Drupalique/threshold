@@ -42,10 +42,14 @@ export function withStrength(base: number, statuses: StatusBag): number {
   return base + stacksOf(statuses, 'strength');
 }
 
-/** Knocks a percentage off an outgoing magnitude per Weaken stack held by the entity DEALING it, capped at 100%. */
-export function withWeaken(magnitude: number, statuses: StatusBag, pctPerStack: number): number {
+/**
+ * Knocks a flat percentage off an outgoing magnitude while the entity
+ * DEALING it holds any Weaken stacks at all -- the stack count is duration
+ * only (see tickStatuses above), not intensity, so 1 stack and 10 stacks cut
+ * the same amount off the top and damage can never be reduced past `pct`.
+ */
+export function withWeaken(magnitude: number, statuses: StatusBag, pct: number): number {
   const stacks = stacksOf(statuses, 'weaken');
   if (stacks === 0) return magnitude;
-  const reduced = magnitude * Math.max(0, 1 - stacks * pctPerStack);
-  return Math.max(0, Math.round(reduced));
+  return Math.max(0, Math.round(magnitude * (1 - pct)));
 }

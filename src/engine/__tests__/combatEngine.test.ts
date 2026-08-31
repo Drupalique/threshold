@@ -732,13 +732,14 @@ describe('weaken suit (Hex)', () => {
         { id: 'ph2', kind: 'creature', suit: 'rot' },
       ],
     };
-    // raw magnitude = (2 already on the table + 2 played = 4 on the table) x 2 hand = 8, weakened by stacks x 10%
+    // raw magnitude = (2 already on the table + 2 played = 4 on the table) x 2 hand = 8, weakened by a
+    // flat WEAKEN_PCT (25%) regardless of stack count -- stacks are duration only, not intensity.
     let next = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
       rng,
     );
-    const expectedMagnitude = Math.max(0, Math.round(8 * Math.max(0, 1 - stacks * 0.1)));
+    const expectedMagnitude = Math.round(8 * (1 - 0.25));
     // The rider is a flat bonus, not run through withWeaken -- each of the 2
     // played cards' own +1 basic rider (2 total) lands unweakened, on top of
     // the weakened main magnitude.
@@ -747,6 +748,31 @@ describe('weaken suit (Hex)', () => {
 
     next = applyCombatAction(next, { type: 'PLAYER_PASS' }, rng);
     expect(next.playerStatuses.weaken).toBe(stacks - 1); // decays by 1 at the end of the player's turn
+  });
+
+  it('a large pile of Weaken stacks still only cuts the flat WEAKEN_PCT -- never zeroes out damage', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1' })] });
+    const rng = createRng(6);
+    const state: CombatState = makeCombat(room, rng, 30, 30, {
+      playerStatuses: { weaken: 25 }, // far more stacks than the old %-per-stack math could tolerate
+      table: [
+        { id: 't1', suit: 'rot', ownerId: 'room' },
+        { id: 't2', suit: 'rot', ownerId: 'room' },
+      ],
+      playerHand: [
+        { id: 'ph1', kind: 'creature', suit: 'rot' },
+        { id: 'ph2', kind: 'creature', suit: 'rot' },
+      ],
+    });
+    // raw magnitude = (2 + 2) x 2 = 8, cut by a flat 25% regardless of the 25 stacks held.
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'rot', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
+      rng,
+    );
+    const expectedMagnitude = Math.round(8 * (1 - 0.25));
+    expect(expectedMagnitude).toBeGreaterThan(0);
+    expect(next.enemies[0].hp).toBe(20 - expectedMagnitude - 2);
   });
 });
 
@@ -777,6 +803,30 @@ describe('poison suit (Venom)', () => {
     const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
     expect(next.enemies[0].hp).toBe(20 - 1 - 3); // its own poison tick, at the true end of its own turn
     expect(next.enemies[0].statuses.poison).toBe(2); // decays by 1
+  });
+
+  it('ignores Guard entirely -- a poisoned enemy\'s own tick lands straight on HP, and its Guard is untouched', () => {
+    const room = makeRoom({
+      enemies: [makeEnemy({ instanceId: 'e1', hp: 20, hpMax: 20, guard: 10, statuses: { poison: 3 }, hand: [] })],
+    });
+    const rng = createRng(31);
+    const state = makeCombat(room, rng, 30, 30, { playerHand: [], activeTurn: 'enemy', activeEnemyIndex: 0 });
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+    expect(next.enemies[0].hp).toBe(20 - 3); // poison bypasses its 10 Guard entirely
+    expect(next.enemies[0].guard).toBe(10); // Guard is left untouched, not consumed
+  });
+
+  it('ignores Guard entirely -- the player\'s own poison tick lands straight on HP, and their Guard is untouched', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1' })] });
+    const rng = createRng(32);
+    const state = makeCombat(room, rng, 30, 30, {
+      playerHand: [],
+      playerGuard: 10,
+      playerStatuses: { poison: 4 },
+    });
+    const next = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
+    expect(next.playerHP).toBe(30 - 4); // poison bypasses the 10 Guard entirely
+    expect(next.playerGuard).toBe(10); // Guard is left untouched, not consumed
   });
 });
 

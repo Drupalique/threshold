@@ -176,9 +176,12 @@ export const ENEMY_LOW_HP_HEAL_GUARD_THRESHOLD_PCT = 0.4;
 // --- Status effects ---------------------------------------------------
 // Weaken/Strength/Poison are stack counts that decay by 1 per holder turn
 // (see engine/statusEffects.ts). Strength and Poison convert 1:1 into flat
-// damage per stack; Weaken needs a %-per-stack conversion, tuned here so
-// existing content (Rot Husk's old flat 30% debuff) maps onto 3 stacks.
-export const WEAKEN_PCT_PER_STACK = 0.1;
+// damage per stack; Weaken is different -- its stack count is duration only
+// (how many of the dealer's own turns it keeps applying), while the cut
+// itself is this one flat percentage taken off the top of the dealer's
+// outgoing damage whenever any Weaken stacks are held, so a big claim that
+// lands a pile of stacks just makes Weaken last longer, never hit harder.
+export const WEAKEN_PCT = 0.25;
 
 // --- Doors ------------------------------------------------------------
 

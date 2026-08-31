@@ -19,7 +19,7 @@ import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken } from './s
 import { STATUS_DEFS } from '../types/status';
 import {
   SUIT_DEFINITIONS,
-  WEAKEN_PCT_PER_STACK,
+  WEAKEN_PCT,
   PLAYS_PER_TURN_BASE,
   ENEMY_PLAYS_PER_TURN,
 } from '../config/constants';
@@ -276,7 +276,7 @@ function computeMagnitude(
   const tableCountAfterPlay = tableCountBefore + handCount;
   const boostedTotal = isThreat ? withStrength(tableCountAfterPlay, actorStatuses) : tableCountAfterPlay;
   const rawMagnitude = boostedTotal * handCount;
-  const magnitude = isThreat ? withWeaken(rawMagnitude, actorStatuses, WEAKEN_PCT_PER_STACK) : rawMagnitude;
+  const magnitude = isThreat ? withWeaken(rawMagnitude, actorStatuses, WEAKEN_PCT) : rawMagnitude;
   return { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks };
 }
 
@@ -417,7 +417,7 @@ function performPlay(
 
   const weakenNote =
     weakenStacks > 0
-      ? ` (weakened -${Math.round(Math.min(1, weakenStacks * WEAKEN_PCT_PER_STACK) * 100)}% from ${weakenStacks} stack${weakenStacks === 1 ? '' : 's'})`
+      ? ` (weakened -${Math.round(WEAKEN_PCT * 100)}%, ${weakenStacks} turn${weakenStacks === 1 ? '' : 's'} left)`
       : '';
   const strengthNote = strengthStacks > 0 ? ` (+${strengthStacks} from Strength)` : '';
   const actorName = actorNameOf(state, actor);
@@ -550,17 +550,13 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
   const postPlays = next.enemies.find((e) => e.instanceId === enemyId)!;
   const { statuses: tickedStatuses, poisonDamage } = tickStatuses(postPlays.statuses);
   let tickedHp = postPlays.hp;
-  let tickedGuard = postPlays.guard;
+  const tickedGuard = postPlays.guard;
   let poisonMessage = '';
   if (poisonDamage > 0) {
-    const result = absorbDamage(tickedHp, tickedGuard, poisonDamage);
-    const dealt = tickedHp - result.hp;
-    tickedHp = result.hp;
-    tickedGuard = result.guard;
-    poisonMessage =
-      result.absorbed > 0
-        ? `${postPlays.name}'s poison deals ${poisonDamage} -- Guard absorbs ${result.absorbed}, ${dealt} gets through.`
-        : `${postPlays.name}'s poison deals ${dealt}.`;
+    // Poison ignores Guard entirely -- it lands straight on HP, unlike an
+    // ordinary threat/attack hit (see absorbDamage above).
+    tickedHp = Math.max(0, tickedHp - poisonDamage);
+    poisonMessage = `${postPlays.name}'s poison deals ${poisonDamage}.`;
     if (tickedHp <= 0) poisonMessage += ` ${postPlays.name} is defeated!`;
   }
 
@@ -653,22 +649,19 @@ function endTurn(
     // at index 0.
     const { statuses: tickedStatuses, poisonDamage } = tickStatuses(next.playerStatuses);
     let playerHP = next.playerHP;
-    let playerGuard = next.playerGuard;
+    const playerGuard = next.playerGuard;
     let log = next.log;
     if (poisonDamage > 0) {
-      const result = absorbDamage(playerHP, playerGuard, poisonDamage);
-      const dealt = playerHP - result.hp;
-      playerHP = result.hp;
-      playerGuard = result.guard;
+      // Poison ignores Guard entirely -- it lands straight on HP, unlike an
+      // ordinary threat/attack hit (see absorbDamage above).
+      playerHP = Math.max(0, playerHP - poisonDamage);
       log = [
         ...log,
         makeLog(
           next.turnNumber,
           'system',
           'poison',
-          result.absorbed > 0
-            ? `Poison deals ${poisonDamage} -- Guard absorbs ${result.absorbed}, you take ${dealt}.`
-            : `Poison deals ${dealt}.`,
+          `Poison deals ${poisonDamage}.`,
           { playerHP, playerHPMax: next.playerHPMax, playerGuard },
         ),
       ];
