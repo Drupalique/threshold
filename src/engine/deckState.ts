@@ -1,14 +1,64 @@
 import type { Card } from '../types/cards';
 import type { Rng } from './rng';
 
-/** Fisher-Yates using the seeded Rng, so runs (and reshuffles within a run) stay reproducible from a seed. Generic so it works for both the player's Card[] deck and an enemy's CreatureCard[] deck. */
-export function shuffleDeck<T extends Card>(deck: T[], rng: Rng): T[] {
+function fisherYates<T>(deck: T[], rng: Rng): T[] {
   const arr = [...deck];
   for (let i = arr.length - 1; i > 0; i--) {
     const j = rng.int(0, i);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+// A QuakeCard carries no suit, and each one is rare/one-off enough that
+// treating it as its own always-distinct "suit" (keyed by id) is simplest --
+// it never counts as clumping with anything, itself included.
+function suitKeyOf(card: Card): string {
+  return card.kind === 'creature' ? card.suit : `quake:${card.id}`;
+}
+
+/**
+ * Shuffles `deck` with the seeded Rng, then interleaves it so a
+ * genuinely-random order doesn't still *feel* clumpy at the table (e.g. 3
+ * Wolves landing back to back in a hand). Cards are bucketed by suit
+ * (bucket order and each bucket's internal order both come straight from
+ * the Fisher-Yates shuffle, so which suit wins a size tie is still
+ * seed-random, not fixed), then built up one card at a time by always
+ * pulling from the largest remaining bucket that isn't the one the last
+ * card came from -- the standard greedy for "rearrange so no two adjacent
+ * match" (equivalent to LeetCode's Reorganize String), which is provably
+ * optimal: it produces zero adjacent same-suit pairs whenever that's
+ * possible at all, and when one suit makes up more than half the deck (the
+ * only case where some adjacency is unavoidable) it's forced to fall back
+ * to repeating the prior bucket only exactly as often as the math demands.
+ * No extra rng draws beyond the initial shuffle, so results stay
+ * reproducible from a seed. Generic so it works for both the player's
+ * Card[] deck and an enemy's CreatureCard[] deck.
+ */
+export function shuffleDeck<T extends Card>(deck: T[], rng: Rng): T[] {
+  const shuffled = fisherYates(deck, rng);
+
+  const buckets = new Map<string, T[]>();
+  for (const card of shuffled) {
+    const bucket = buckets.get(suitKeyOf(card));
+    if (bucket) bucket.push(card);
+    else buckets.set(suitKeyOf(card), [card]);
+  }
+  const groups = [...buckets.values()];
+
+  const result: T[] = [];
+  let lastGroup: T[] | null = null;
+  while (result.length < shuffled.length) {
+    let best: T[] | null = null;
+    for (const group of groups) {
+      if (group.length === 0 || group === lastGroup) continue;
+      if (!best || group.length > best.length) best = group;
+    }
+    if (!best) best = lastGroup!; // every other bucket is empty -- a repeat here is unavoidable
+    result.push(best.shift()!);
+    lastGroup = best;
+  }
+  return result;
 }
 
 export interface DrawResult<T extends Card> {

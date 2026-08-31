@@ -6,10 +6,11 @@ import { BOON_SUIT, GUARD_SUIT, WEAKEN_SUIT, POISON_SUIT, STRENGTH_SUIT } from '
 
 export interface DeckParams {
   // The threat suits eligible for the "on-suit" bucket -- a property of the
-  // room (RoomParams.threatSuits), not of any particular enemy. Pool and
-  // hand generation pass the same list, since piles aren't enemy-owned (see
-  // design doc 4.8): whatever suits are live in the pool are exactly what
-  // the player's hand should be weighted toward.
+  // room (RoomParams.threatSuits), not of any particular enemy. Only ever
+  // used to bias the room's own neutral table deal (tableState.ts's
+  // dealRoomTable) -- the player's hand is drawn from their own persistent
+  // run deck (deckState.ts's shuffleDeck/drawCards) and is never weighted
+  // toward a room's threat suits.
   onSuitTargets: SuitId[];
   onSuitRatio: number;
   boonRatio: number;
