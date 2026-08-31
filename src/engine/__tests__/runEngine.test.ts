@@ -10,7 +10,6 @@ import {
   restRemoveCard,
 } from '../runEngine';
 import type { RunState } from '../../types/run';
-import type { BranchRoot } from '../../types/door';
 import type { RestRoomInstance } from '../../types/room';
 
 function clearCurrentRoom(run: RunState): RunState {
@@ -19,19 +18,39 @@ function clearCurrentRoom(run: RunState): RunState {
 
 /**
  * Forces the run into the 'rest' phase deterministically, bypassing
- * doorGenerator's RNG-dependent REST_ROOM_RATIO roll -- these tests care
- * about restHeal/restRemoveCard's own behavior, not whether a given seed
- * happens to roll a rest room.
+ * runTree's RNG-dependent REST_ROOM_RATIO roll -- these tests care about
+ * restHeal/restRemoveCard's own behavior, not whether a given seed happens
+ * to roll a rest room. Injects a synthetic rest-room node into the run's
+ * (already-built) tree under a path that can't collide with a real one.
  */
 function enterRestRoom(run: RunState): RunState {
   const restRoom: RestRoomInstance = { kind: 'rest', id: 'test-rest-room' };
-  const branchRoot: BranchRoot = { id: 'branch-test-rest-room', depth: 1, room: restRoom };
+  const childPath = 'test-rest-room';
   const doorId = 'door-test-rest-room';
   const withDoor: RunState = {
     ...run,
     phase: 'door-choice',
-    branchRoots: { ...run.branchRoots, [branchRoot.id]: branchRoot },
-    currentDoors: [{ id: doorId, tags: { size: 'small', color: 'red' }, branchRootId: branchRoot.id }],
+    runTree: {
+      ...run.runTree,
+      nodes: {
+        ...run.runTree.nodes,
+        [childPath]: {
+          path: childPath,
+          floor: run.depth + 2,
+          room: restRoom,
+          // Rest rooms aren't terminal (unless on the final floor, not the
+          // case here) -- finishRestRoom always proceeds to another door
+          // pair afterward, so this synthetic node needs one too. Nothing
+          // in these tests advances past it, so the target paths don't need
+          // to resolve to real nodes.
+          doors: [
+            { tags: { size: 'small', color: 'red' }, childPath: `${childPath}0` },
+            { tags: { size: 'large', color: 'blue' }, childPath: `${childPath}1` },
+          ],
+        },
+      },
+    },
+    currentDoors: [{ id: doorId, tags: { size: 'small', color: 'red' }, childPath }],
   };
   return chooseDoor(withDoor, doorId);
 }
@@ -66,7 +85,7 @@ describe('reward flow', () => {
     // combat -- pick whichever candidate is a combat room, since that's
     // what this test is actually exercising.
     const combatDoor = run.currentDoors!.find(
-      (d) => run.branchRoots[d.branchRootId].room.kind === 'combat',
+      (d) => run.runTree.nodes[d.childPath].room.kind === 'combat',
     )!;
     run = chooseDoor(run, combatDoor.id);
     const allIdsInNextRoom = new Set([

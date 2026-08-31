@@ -1,7 +1,8 @@
 import type { CombatState } from './combat';
-import type { BranchRoot, Door } from './door';
+import type { Door } from './door';
 import type { Card } from './cards';
 import type { Rng } from '../engine/rng';
+import type { RunTree } from './runTree';
 
 export type RunPhase =
   | 'start'
@@ -30,8 +31,13 @@ export interface RunState {
   // Set by resolveCombatEnd's room-cleared branch, consumed by chooseReward.
   // Null outside the 'reward' phase.
   rewardOptions: Card[] | null;
-  branchRoots: Record<string, BranchRoot>;
-  currentBranchRootId: string | null;
+  // The entire run's precomputed branching structure (see types/runTree.ts,
+  // engine/runTree.ts's buildRunTree) -- built once from the seed at
+  // createNewRun and held for the run's whole lifetime, not just the path
+  // actually taken, so dev tooling can show the whole tree at once.
+  runTree: RunTree;
+  // Path (into runTree.nodes) of the room currently being played.
+  currentPath: string;
   currentDoors: Door[] | null;
   combat: CombatState | null;
 }

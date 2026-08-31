@@ -44,3 +44,21 @@ export function createRng(seed: number): Rng {
 export function createRngFromState(state: number): Rng {
   return fromState(state);
 }
+
+/**
+ * Deterministic per-node RNG, independent of the sequential/mutable stream
+ * `createRng` produces. Folds `seed` and `path` (a run-tree node's location,
+ * see engine/runTree.ts) into a single 32-bit seed via FNV-1a, so a node's
+ * generated content depends only on (seed, path) -- never on how much
+ * unrelated RNG (combat, rewards) happened to be consumed getting there.
+ * This is what makes the whole run tree a pure function of the seed.
+ */
+export function createNodeRng(seed: number, path: string): Rng {
+  const key = `${seed}:${path}`;
+  let hash = 0x811c9dc5 ^ (seed >>> 0);
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return fromState(hash >>> 0);
+}

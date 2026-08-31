@@ -1,4 +1,3 @@
-import type { RoomInstance } from './room';
 import type { PoolSizeBand } from './room';
 
 export type DoorColor = 'red' | 'blue';
@@ -8,19 +7,9 @@ export interface DoorTags {
   color: DoorColor;
 }
 
-/**
- * A branch root only ever has depth 1 in the prototype, but doors reference
- * it by id (never embed a RoomInstance directly) so a future multi-depth
- * subtree/convergent-node system can be added without touching this shape.
- */
-export interface BranchRoot {
-  id: string;
-  depth: 1;
-  room: RoomInstance;
-}
-
+/** References the run tree node (RunTree.nodes[childPath], see types/runTree.ts) this door leads to. */
 export interface Door {
   id: string;
   tags: DoorTags;
-  branchRootId: string;
+  childPath: string;
 }

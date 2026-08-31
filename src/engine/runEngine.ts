@@ -1,9 +1,9 @@
 import type { RunState } from '../types/run';
-import type { BranchRoot } from '../types/door';
+import type { Door } from '../types/door';
+import type { CombatRoomInstance } from '../types/room';
 import type { CombatAction } from '../types/combat';
 import { createRng } from './rng';
-import { generateRoom } from './roomGenerator';
-import { generateDoorPair } from './doorGenerator';
+import { buildRunTree } from './runTree';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
 import { generateRewardOptions } from './rewardGenerator';
 import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
@@ -12,6 +12,8 @@ export function createNewRun(seed: number): RunState {
   return {
     seed,
     rng: createRng(seed),
+    runTree: buildRunTree(seed, RUN_MAX_DEPTH),
+    currentPath: '',
     depth: 0,
     maxDepth: RUN_MAX_DEPTH,
     playerHP: PLAYER_HP_MAX,
@@ -19,24 +21,17 @@ export function createNewRun(seed: number): RunState {
     phase: 'start',
     deck: [...STARTER_DECK],
     rewardOptions: null,
-    branchRoots: {},
-    currentBranchRootId: null,
     currentDoors: null,
     combat: null,
   };
 }
 
 export function startFirstRoom(run: RunState): RunState {
-  const room = generateRoom(run.rng, run.depth + 1);
-  const branchRoot: BranchRoot = { id: `branch-${room.id}`, depth: 1, room };
-  const combat = initCombat(room, run.rng, run.playerHP, run.playerHPMax, run.deck);
-  return {
-    ...run,
-    phase: 'combat',
-    branchRoots: { [branchRoot.id]: branchRoot },
-    currentBranchRootId: branchRoot.id,
-    combat,
-  };
+  const node = run.runTree.nodes[run.currentPath];
+  // The floor-1 root is always a combat room (see runTree.ts's buildRunTree
+  // -- the very first room has no door choice, so it can never roll rest).
+  const combat = initCombat(node.room as CombatRoomInstance, run.rng, run.playerHP, run.playerHPMax, run.deck);
+  return { ...run, phase: 'combat', combat };
 }
 
 /**
@@ -78,20 +73,22 @@ export function resolveCombatEnd(run: RunState): RunState {
   return { ...run, depth: newDepth, phase: 'reward', rewardOptions };
 }
 
-/** Shared tail for both chooseReward and (in principle) any other reward-phase exit -- generates the next door pair. */
+/**
+ * Shared tail for both chooseReward and (in principle) any other
+ * reward-phase exit -- surfaces the current tree node's precomputed door
+ * pair (see runTree.ts's buildRunTree) rather than generating one live, so
+ * the doors on offer are exactly what the seed already fixed for this path.
+ */
 function proceedToDoors(run: RunState): RunState {
-  const { doors, branchRoots } = generateDoorPair(run.rng, run.depth + 1);
-  const branchRootMap = { ...run.branchRoots };
-  if (run.currentBranchRootId) delete branchRootMap[run.currentBranchRootId];
-  for (const br of branchRoots) branchRootMap[br.id] = br;
+  const node = run.runTree.nodes[run.currentPath];
+  const doorRefs = node.doors!;
+  const doors: Door[] = doorRefs.map((d) => ({
+    id: `door-${d.childPath}`,
+    tags: d.tags,
+    childPath: d.childPath,
+  }));
 
-  return {
-    ...run,
-    phase: 'door-choice',
-    branchRoots: branchRootMap,
-    currentDoors: doors,
-    currentBranchRootId: null,
-  };
+  return { ...run, phase: 'door-choice', currentDoors: doors };
 }
 
 /** Appends the chosen reward card to the persistent deck, then proceeds to door generation. */
@@ -122,24 +119,22 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
   if (run.phase !== 'door-choice' || !run.currentDoors) return run;
   const chosen = run.currentDoors.find((d) => d.id === doorId);
   if (!chosen) return run;
-  const branchRoot = run.branchRoots[chosen.branchRootId];
-  if (!branchRoot) return run;
+  const node = run.runTree.nodes[chosen.childPath];
+  if (!node) return run;
 
-  // Only the chosen branch root survives -- the unchosen door and its
-  // subtree are discarded, making "no backtracking, no preview" structural.
-  const branchRootMap: Record<string, BranchRoot> = { [branchRoot.id]: branchRoot };
-  const base = {
-    ...run,
-    branchRoots: branchRootMap,
-    currentBranchRootId: branchRoot.id,
-    currentDoors: null,
-  };
+  // The unchosen door's subtree is never played, but -- unlike before --
+  // it isn't discarded from state either: the whole tree was precomputed
+  // up front (buildRunTree) and stays there for the run's lifetime so dev
+  // tooling can show it (see ui/screens/RunTreeScreen.tsx). "No
+  // backtracking" is enforced at the play level (currentPath only ever
+  // advances), not by deleting data.
+  const base = { ...run, currentPath: chosen.childPath, currentDoors: null };
 
-  if (branchRoot.room.kind === 'rest') {
+  if (node.room.kind === 'rest') {
     return { ...base, phase: 'rest' as const, combat: null };
   }
 
-  const combat = initCombat(branchRoot.room, run.rng, run.playerHP, run.playerHPMax, run.deck);
+  const combat = initCombat(node.room, run.rng, run.playerHP, run.playerHPMax, run.deck);
   return { ...base, phase: 'combat' as const, combat };
 }
 

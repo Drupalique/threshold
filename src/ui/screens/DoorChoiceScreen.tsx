@@ -9,7 +9,7 @@ export function DoorChoiceScreen() {
       <h2>Room {state.depth} cleared -- choose a door</h2>
       <div className="door-choices">
         {state.currentDoors!.map((door) => (
-          <DoorCard key={door.id} door={door} onChoose={() => chooseDoor(door.id)} />
+          <DoorCard key={door.id} door={door} tree={state.runTree} onChoose={() => chooseDoor(door.id)} />
         ))}
       </div>
       {/* The just-cleared room's combat state is still sitting in run.combat

@@ -6,7 +6,7 @@ A snapshot of how the prototype actually works today, as one document you can re
 
 ## 1. Premise and run structure
 
-A single-player roguelike run: a linear sequence of up to `RUN_MAX_DEPTH` (**10**) rooms. Most rooms are cleared through a set-collection combat round; a door occasionally leads to a **rest room** instead (§6) — a non-combat stop that heals the player or lets them remove a card from their deck. Clearing a non-final combat room offers a reward (a card added to your deck), then a binary door choice for the next room; a rest room skips the reward and goes straight to the next door choice. No backtracking, no branch preview beyond the two doors in front of you.
+A single-player roguelike run: a linear sequence of up to `RUN_MAX_DEPTH` (**10**) rooms. Most rooms are cleared through a set-collection combat round; a door occasionally leads to a **rest room** instead (§6) — a non-combat stop that heals the player or lets them remove a card from their deck. Clearing a non-final combat room offers a reward (a card added to your deck), then a binary door choice for the next room; a rest room skips the reward and goes straight to the next door choice. No backtracking -- but the branch preview is currently everything, not nothing: the whole run's tree is fixed by the seed up front and the door screen shows each door's full downstream subtree outright (§6), a deliberate, temporary state of full disclosure ahead of a later pass to make doors require real "scrutiny and interpretation" again.
 
 The run ends when either:
 - **Player HP reaches 0** (`run-over`), or
@@ -148,23 +148,30 @@ The player's hand is **not** generated per-room. `RunState.deck` is a run-level 
 
 ## 6. Doors
 
-The very first room is generated directly, with no door choice involved. After a non-final room clears (and its reward is picked), two doors are generated. Each door is tagged with two axes describing the room behind it, each independently correlated to the true room at `DOOR_CORRELATION_RATE` (**75%**) — not guaranteed:
+The entire run's branching structure is a perfect binary tree fixed by the seed alone: a floor-1 root plus two doors at every floor 2..`RUN_MAX_DEPTH`, `engine/runTree.ts`'s `buildRunTree` builds all `2^RUN_MAX_DEPTH - 1` (**1023**) nodes eagerly at run start, before a single card is drawn. Each node's own content comes from `rng.ts`'s `createNodeRng(seed, path)` — a deterministic stream keyed only by the node's path (a string of `'0'`/`'1'` choices from the root), never the sequential `run.rng` combat/rewards consume — so the room behind a door can't be perturbed by how a fight was played on the way to it, only by the seed and the choices actually made. `RunState.runTree` holds the whole tree for the run's entire lifetime (not just the path taken) and `RunState.currentPath` tracks where play currently is within it; `runEngine.ts`'s `startFirstRoom`/`proceedToDoors`/`chooseDoor` all just look nodes up rather than generating anything live.
+
+Each door is tagged with two axes describing the room behind it, each independently correlated to the true room at `DOOR_CORRELATION_RATE` (**75%**) — not guaranteed:
 
 - **Size** (small/large) — correlates with the next room's table-deal size band.
 - **Color** (red/blue) — correlates with the next room's `primarySuit` family (Wolf/Spider = red, Ember/Rot = blue; a room whose `primarySuit` is a boon/guard/status suit has no fixed family, so its color is an uncorrelated coinflip).
 
-Choosing a door discards the other door and its room entirely — no backtracking, no preview. Both candidate rooms for a pair are generated speculatively up front (each wrapped in a `BranchRoot`, referenced by id rather than embedded inline, so a future multi-depth/convergent-node system could be layered on without a rewrite) — only the chosen one survives.
+Choosing a door only ever *advances* `currentPath` — it never discards the sibling subtree from state, since the whole tree already exists. "No backtracking" is enforced at the play level (nothing lets `currentPath` move backward or sideways), not by deleting data. That persistence is what powers two UI surfaces layered on top of the same tree data:
+
+- **The door-choice screen** (`DoorCard.tsx`) embeds a full, unabstracted preview of everything down each door — `RunTreeView.tsx` rooted at that door's `childPath` — rather than making the player infer the room from tags alone. This is a deliberate, temporary choice (see the top of this doc): the size/color tags above are the eventual signal once the full reveal is dialed back to something requiring "scrutiny and interpretation"; for now every room down every path is shown outright.
+- **The "Tree (dev)" tab** (`App.tsx`, `RunTreeScreen.tsx`) renders the same `RunTreeView` rooted at the whole run (`rootPath: ''`), with `currentPath` highlighted — a standing dev view of the entire seed's run, independent of the phase-based game screens.
+
+`RunTreeView.tsx` lays a subtree out as one column per floor (arithmetic, not DOM-measured, since a perfect binary tree's node positions are just leaf-averages), shrinking from labeled chips to small dots past a few floors of depth so a wide subtree stays scrollable instead of unusable — nothing is hidden or lazily generated, every node is real and still carries a full hover tooltip (`ui/roomSummary.ts`), just compactly.
 
 ### Rest rooms
 
-Each of a door pair's two candidate rooms independently rolls `REST_ROOM_RATIO` (**15%**) to be a rest room (`RestRoomInstance`, `types/room.ts`) instead of a combat room (`roomGenerator.ts`'s `generateRestRoom`, called from `doorGenerator.ts`) — never on the floor `RUN_MAX_DEPTH` room, which is always the guaranteed elite boss (§3), and never as the very first room (which is generated directly, no door involved). A rest room has no table, no enemies, no `RoomParams` at all — choosing a door into one (`runEngine.ts`'s `chooseDoor`) sets `RunState.phase` to `'rest'` with `combat: null`, rendered by `RestScreen.tsx`.
+Each tree node below floor `RUN_MAX_DEPTH` independently rolls `REST_ROOM_RATIO` (**15%**) to be a rest room (`RestRoomInstance`, `types/room.ts`) instead of a combat room (`roomGenerator.ts`'s `generateRestRoom`, called from `engine/runTree.ts`'s `buildRunTree`) — never on the floor `RUN_MAX_DEPTH` room, which is always the guaranteed elite boss (§3), and never as the very first room (which has no door leading to it). A rest room has no table, no enemies, no `RoomParams` at all — choosing a door into one (`runEngine.ts`'s `chooseDoor`) sets `RunState.phase` to `'rest'` with `combat: null`, rendered by `RestScreen.tsx`.
 
 At a rest room the player picks **exactly one** of two mutually exclusive options (StS-style campfire), each immediately resolving the room and proceeding straight to the next door choice — no reward is offered either way, unlike clearing a combat room:
 
 - **Rest** (`runEngine.ts`'s `restHeal`) — restores `REST_HEAL_PCT` (**30%**) of `playerHPMax`, rounded, capped at `playerHPMax`. Still a legal (if wasted) choice at full HP, rather than forcing a removal on a player who doesn't want one.
 - **Remove a card** (`restRemoveCard`) — permanently deletes one chosen card from `run.deck` by its id. The only way cards ever leave the persistent deck; it only ever grows otherwise (§5).
 
-A rest room's door tags are deliberately uncorrelated noise (`doorGenerator.ts`'s `trueTagsForRoom`) rather than a reliable "this door is safe" tell — same fallback an untyped-suit combat room's color already gets. Distinguishing rest from combat at the door screen is a possible follow-up, not implemented.
+A rest room's door tags are deliberately uncorrelated noise (`runTree.ts`'s `trueTagsForRoom`) rather than a reliable "this door is safe" tell — same fallback an untyped-suit combat room's color already gets. The door screen's full tree reveal (above) makes this moot for now, since a rest room shows up plainly in the preview regardless of its tags; the noise only matters again once the reveal is dialed back.
 
 ---
 

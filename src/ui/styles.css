@@ -593,6 +593,7 @@ button {
 .door-choices {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 2rem;
   margin-top: 2rem;
 }
@@ -605,15 +606,14 @@ button {
 
 .door-card {
   background: #1c1c26;
-  border: none;
   border-radius: 10px;
   padding: 1rem;
-  width: 180px;
+  width: 260px;
   color: white;
 }
 
 .door-card-visual {
-  height: 140px;
+  height: 36px;
   border-radius: 6px;
   display: flex;
   align-items: center;
@@ -625,4 +625,157 @@ button {
   font-size: 0.85rem;
   color: #ccc;
   text-align: left;
+  margin-bottom: 0.75rem;
+}
+
+.run-tree-view.door-card-tree {
+  max-height: 320px;
+  margin-bottom: 0.9rem;
+}
+
+.door-card-choose {
+  width: 100%;
+  background: #4a4ae0;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  font-size: 1rem;
+}
+
+/* --- Run tree view (shared by door-card previews and the dev tab) --- */
+
+.run-tree-view {
+  overflow: auto;
+  background: #14141c;
+  border-radius: 6px;
+  max-height: 420px;
+}
+
+.run-tree-canvas {
+  position: relative;
+}
+
+.run-tree-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.run-tree-edge {
+  fill: none;
+  stroke: #3a3a4a;
+  stroke-width: 1;
+}
+
+.run-tree-row-label {
+  position: absolute;
+  left: 0;
+  transform: translateY(-50%);
+  font-size: 0.62rem;
+  color: #777;
+  white-space: nowrap;
+}
+
+.run-tree-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #3a3a4a;
+  cursor: default;
+}
+
+.run-tree-node--combat {
+  background: #8e44ad;
+}
+.run-tree-node--rest {
+  background: #27ae60;
+}
+
+.run-tree-node--on-path {
+  outline: 1px solid #7a6a2a;
+  outline-offset: 1px;
+}
+.run-tree-node--current {
+  outline: 2px solid #f1c40f;
+  outline-offset: 2px;
+  box-shadow: 0 0 8px #f1c40f;
+  z-index: 1;
+  width: 13px;
+  height: 13px;
+  background: #f1c40f !important;
+}
+
+/* --- Dev tree tab --- */
+
+.tab-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.tab-button {
+  background: #1c1c26;
+  color: #aaa;
+  border: 1px solid #3a3a4a;
+  border-radius: 6px;
+  padding: 0.4rem 1rem;
+  font-size: 0.9rem;
+}
+
+.tab-button--active {
+  background: #4a4ae0;
+  color: white;
+  border-color: #4a4ae0;
+}
+
+.app-shell--full {
+  max-width: none;
+}
+
+.run-tree-screen-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.run-tree-legend {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.run-tree-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.run-tree-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.run-tree-swatch--combat {
+  background: #8e44ad;
+}
+.run-tree-swatch--rest {
+  background: #27ae60;
+}
+.run-tree-swatch--current {
+  background: #3a3a4a;
+  outline: 2px solid #f1c40f;
+  outline-offset: 1px;
+}
+
+.run-tree-view--full {
+  max-height: 78vh;
 }

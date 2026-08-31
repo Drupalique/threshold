@@ -24,8 +24,6 @@ import {
   THREAT_SUIT_COUNT_BY_SIZE_BAND,
 } from '../config/constants';
 
-let roomCounter = 0;
-
 /**
  * How many enemies this room gets, weighted by floor -- previously a flat
  * uniform roll across ROOM_MIN/MAX_ENEMIES regardless of depth, which batch
@@ -108,8 +106,7 @@ function pickThreatSuits(sizeBand: PoolSizeBand, rng: Rng): SuitId[] {
   return pickDistinct(rng, THREAT_SUITS, THREAT_SUIT_COUNT_BY_SIZE_BAND[sizeBand]);
 }
 
-export function generateRoom(rng: Rng, floor: number): CombatRoomInstance {
-  const id = `room-${roomCounter++}`;
+export function generateRoom(rng: Rng, floor: number, id: string): CombatRoomInstance {
   const enemies = pickEnemies(floor, id, rng);
 
   const sizeBand: PoolSizeBand = uniformPick(rng, ['small', 'large']);
@@ -144,8 +141,7 @@ export function generateRoom(rng: Rng, floor: number): CombatRoomInstance {
   return { kind: 'combat', id, params, enemies };
 }
 
-/** A campfire/fairy's-cave rest stop -- no table, no enemies, nothing to roll besides an id. See doorGenerator.ts's REST_ROOM_RATIO. */
-export function generateRestRoom(): RestRoomInstance {
-  const id = `room-${roomCounter++}`;
+/** A campfire/fairy's-cave rest stop -- no table, no enemies, nothing to roll besides an id. See runTree.ts's REST_ROOM_RATIO roll. */
+export function generateRestRoom(id: string): RestRoomInstance {
   return { kind: 'rest', id };
 }
