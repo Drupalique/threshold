@@ -7,8 +7,9 @@
 // Two player-turn decision-makers are available, via PLAYTEST_BOT:
 //   heuristic (default) -- see pickBestPlay below, a scored greedy bot.
 //   llm                 -- combat play/pass decisions go through Claude
-//                           (see llmBot.ts) via a cheap model. Reward and
-//                           door choices stay on the heuristic pickers
+//                           (see llmBot.ts) via a cheap model. Reward,
+//                           door, and rest-room (heal-or-remove-a-card)
+//                           choices all stay on the heuristic pickers
 //                           below regardless of PLAYTEST_BOT -- this only
 //                           swaps out per-turn play/pass decisions.
 // Requires ANTHROPIC_API_KEY when PLAYTEST_BOT=llm. Start small -- each run

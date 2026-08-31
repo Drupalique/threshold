@@ -3,6 +3,14 @@
 // via a forced tool call -- it never has to reconstruct suit-matching or
 // targeting legality itself, which keeps a cheap model's job small and our
 // parsing trivial (an index, or the literal string "pass").
+//
+// Scope is deliberately narrow: only the per-turn play/pass decision goes
+// through the model. Reward, door, and rest-room choices always stay on
+// playtest-sim.ts's heuristic pickers, so this file needs no changes when
+// the enemy roster grows (config/enemies.ts) or a new non-combat room kind
+// is added (e.g. rest rooms) -- combat state (enemy name/HP/guard/statuses,
+// legal plays and their magnitudes) is rendered generically, never
+// hardcoded to a specific suit or enemy def.
 import Anthropic from '@anthropic-ai/sdk';
 import type { CombatState } from '../src/types/combat.ts';
 import type { LegalPlayTarget } from '../src/engine/combatEngine.ts';
