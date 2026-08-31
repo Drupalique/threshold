@@ -598,6 +598,64 @@ button {
   margin-top: 2rem;
 }
 
+.door-choice-layout-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.door-choice-layout-button {
+  background: #1c1c26;
+  color: #aaa;
+  border: 1px solid #3a3a4a;
+  border-radius: 6px;
+  padding: 0.35rem 0.9rem;
+  font-size: 0.85rem;
+}
+
+.door-choice-layout-button--active {
+  background: #4a4ae0;
+  color: white;
+  border-color: #4a4ae0;
+}
+
+.door-tree-choice {
+  max-width: 900px;
+  margin: 2rem auto 0;
+}
+
+.run-tree-view.door-tree-choice-view {
+  max-height: 560px;
+}
+
+.door-tree-choice-options {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.door-tree-choice-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1c1c26;
+  color: white;
+  border: 2px solid;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+}
+
+.door-tree-choice-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
 .door-choice-log {
   max-width: 480px;
   margin: 2.5rem auto 0;
@@ -646,6 +704,7 @@ button {
 /* --- Run tree view (shared by door-card previews and the dev tab) --- */
 
 .run-tree-view {
+  --rt-scale: 1;
   overflow: auto;
   background: #14141c;
   border-radius: 6px;
@@ -654,6 +713,10 @@ button {
 
 .run-tree-canvas {
   position: relative;
+  /* Auto margins center a canvas narrower than its scroll container; they
+     collapse to 0 (ordinary left-aligned scrolling) once it's wider, so this
+     never fights the scrollLeft-centering math in RunTreeView's effect. */
+  margin: 0 auto;
 }
 
 .run-tree-edges {
@@ -666,14 +729,14 @@ button {
 .run-tree-edge {
   fill: none;
   stroke: #3a3a4a;
-  stroke-width: 1;
+  stroke-width: calc(1px * var(--rt-scale));
 }
 
 .run-tree-row-label {
   position: absolute;
   left: 0;
   transform: translateY(-50%);
-  font-size: 0.62rem;
+  font-size: calc(0.62rem * var(--rt-scale));
   color: #777;
   white-space: nowrap;
 }
@@ -681,8 +744,8 @@ button {
 .run-tree-node {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 9px;
-  height: 9px;
+  width: calc(9px * var(--rt-scale));
+  height: calc(9px * var(--rt-scale));
   border-radius: 50%;
   background: #3a3a4a;
   cursor: default;
@@ -704,9 +767,28 @@ button {
   outline-offset: 2px;
   box-shadow: 0 0 8px #f1c40f;
   z-index: 1;
-  width: 13px;
-  height: 13px;
+  width: calc(13px * var(--rt-scale));
+  height: calc(13px * var(--rt-scale));
   background: #f1c40f !important;
+}
+
+.run-tree-node--dimmed {
+  background: #4a4a52 !important;
+  opacity: 0.55;
+}
+
+.run-tree-node--selectable {
+  cursor: pointer;
+  width: calc(15px * var(--rt-scale));
+  height: calc(15px * var(--rt-scale));
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+  z-index: 2;
+}
+
+.run-tree-node--selectable:hover {
+  outline-color: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
 }
 
 /* --- Dev tree tab --- */

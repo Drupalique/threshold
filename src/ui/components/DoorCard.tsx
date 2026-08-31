@@ -1,5 +1,6 @@
 import type { Door } from '../../types/door';
 import type { RunTree } from '../../types/runTree';
+import { DOOR_COLOR_HEX } from '../doorColors';
 import { RunTreeView } from './RunTreeView';
 
 interface DoorCardProps {
@@ -7,8 +8,6 @@ interface DoorCardProps {
   tree: RunTree;
   onChoose: () => void;
 }
-
-const COLOR_HEX: Record<string, string> = { red: '#c0392b', blue: '#2471a3' };
 
 /**
  * Not a single <button> (unlike before) -- it now embeds RunTreeView, whose
@@ -21,7 +20,7 @@ const COLOR_HEX: Record<string, string> = { red: '#c0392b', blue: '#2471a3' };
 export function DoorCard({ door, tree, onChoose }: DoorCardProps) {
   return (
     <div className="door-card">
-      <div className="door-card-visual" style={{ background: COLOR_HEX[door.tags.color] }} />
+      <div className="door-card-visual" style={{ background: DOOR_COLOR_HEX[door.tags.color] }} />
       <div className="door-card-tags">
         <div>Size: {door.tags.size}</div>
         <div>Color: {door.tags.color}</div>

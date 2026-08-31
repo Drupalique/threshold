@@ -199,6 +199,23 @@ export const REST_ROOM_RATIO = 0.15;
 // (GAME_DESIGN.md §7/§10). First-cut number, not balance-tested.
 export const REST_HEAL_PCT = 0.3;
 
+// How many floors below the just-cleared room the door-choice screen's
+// combined-tree view (DoorTreeChoice.tsx) renders, before truncating --
+// unlike DoorCard's per-door preview (still the default, full-reveal view),
+// this mode draws both doors' subtrees as one connected graph rooted at the
+// completed room, so an unbounded depth would make floor-1's choice as
+// sprawling as floor-9's. First-cut number: deep enough to see each door's
+// immediate branching shape (its own two doors), shallow enough to stay
+// legible at a glance.
+export const DOOR_TREE_VIEW_MAX_DEPTH = 3;
+
+// How much larger DoorTreeChoice's graph renders (node size, spacing, row
+// labels -- see RunTreeView's `scale` prop) than the dev tab/DoorCard's 1x
+// baseline. This view is the primary thing on the door-choice screen and its
+// depth is already capped by DOOR_TREE_VIEW_MAX_DEPTH above, so it can afford
+// to run bigger without either becoming illegible or outgrowing the screen.
+export const DOOR_TREE_VIEW_SCALE = 2;
+
 // --- Run / persistent deck ----------------------------------------------
 
 export const RUN_MAX_DEPTH = 10;

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { hierarchy, tree as d3TreeLayout, type HierarchyPointNode } from 'd3-hierarchy';
 import { linkVertical } from 'd3-shape';
 import type { RunTree } from '../../types/runTree';
@@ -18,12 +18,14 @@ interface HierData {
   children?: HierData[];
 }
 
-function buildHierData(tree: RunTree, path: string): HierData {
+/** `remainingDepth` counts floors still to descend -- undefined means unlimited (today's full-reveal previews), 0 stops at this node (no children emitted, even if the room actually has doors). */
+function buildHierData(tree: RunTree, path: string, remainingDepth?: number): HierData {
   const node = tree.nodes[path];
-  return {
-    path,
-    children: node.doors?.map((d) => buildHierData(tree, d.childPath)),
-  };
+  const children =
+    remainingDepth === 0
+      ? undefined
+      : node.doors?.map((d) => buildHierData(tree, d.childPath, remainingDepth === undefined ? undefined : remainingDepth - 1));
+  return { path, children };
 }
 
 interface LayoutNode {
@@ -50,12 +52,17 @@ interface Layout {
  * per-level/per-leaf spacing regardless of how big the subtree is, so
  * layout is pure arithmetic from the tree data alone.
  */
-function computeLayout(tree: RunTree, rootPath: string): Layout | null {
+function computeLayout(tree: RunTree, rootPath: string, maxDepth?: number, scale = 1): Layout | null {
   const rootNode = tree.nodes[rootPath];
   if (!rootNode) return null;
 
-  const root = hierarchy(buildHierData(tree, rootPath), (d) => d.children);
-  const layout = d3TreeLayout<HierData>().nodeSize([LEAF_SPACING, LEVEL_SPACING]);
+  const leafSpacing = LEAF_SPACING * scale;
+  const levelSpacing = LEVEL_SPACING * scale;
+  const labelGutter = LABEL_GUTTER * scale;
+  const padding = PADDING * scale;
+
+  const root = hierarchy(buildHierData(tree, rootPath, maxDepth), (d) => d.children);
+  const layout = d3TreeLayout<HierData>().nodeSize([leafSpacing, levelSpacing]);
   layout(root);
 
   const descendants = root.descendants() as HierarchyPointNode<HierData>[];
@@ -63,8 +70,8 @@ function computeLayout(tree: RunTree, rootPath: string): Layout | null {
   const maxX = Math.max(...descendants.map((d) => d.x));
   const maxLevel = root.height; // every leaf sits at the same depth (perfect binary tree)
 
-  const toScreenX = (x: number) => x - minX + LABEL_GUTTER + PADDING;
-  const toScreenY = (depth: number) => (maxLevel - depth) * LEVEL_SPACING + PADDING;
+  const toScreenX = (x: number) => x - minX + labelGutter + padding;
+  const toScreenY = (depth: number) => (maxLevel - depth) * levelSpacing + padding;
 
   const positions: Record<string, { x: number; y: number }> = {};
   const nodes: LayoutNode[] = descendants.map((d) => {
@@ -95,9 +102,17 @@ function computeLayout(tree: RunTree, rootPath: string): Layout | null {
     edgePaths,
     rowLabels,
     positions,
-    width: maxX - minX + LABEL_GUTTER + PADDING * 2,
-    height: maxLevel * LEVEL_SPACING + PADDING * 2,
+    width: maxX - minX + labelGutter + padding * 2,
+    height: maxLevel * levelSpacing + padding * 2,
   };
+}
+
+/** A node rendered as its own clickable choice (see ui/components/DoorTreeChoice.tsx) -- distinct from currentPath/dimPath, which are informational only. */
+export interface RunTreeSelectableNode {
+  path: string;
+  /** Tints the node to match its door tag; falls back to the ordinary kind color when omitted. */
+  color?: string;
+  onSelect: () => void;
 }
 
 export interface RunTreeViewProps {
@@ -106,11 +121,28 @@ export interface RunTreeViewProps {
   rootPath: string;
   /** When set, highlights this path's ancestor chain (and itself) as "where the player is", and is what the view centers on. Omit to center on rootPath instead (e.g. an unresolved door preview). */
   currentPath?: string;
+  /** Renders this single node greyed out -- "already resolved," distinct from currentPath's "player is here now" glow. Typically rootPath itself, for a just-cleared room shown as the base of its remaining subtree. */
+  dimPath?: string;
+  /** How many floors below rootPath to render -- undefined renders the whole remaining subtree (today's full-reveal door/dev previews). */
+  maxDepth?: number;
+  /** Nodes that render as an enlarged, clickable choice -- e.g. the two doors leading out of dimPath. */
+  selectableNodes?: RunTreeSelectableNode[];
+  /** Uniformly scales node size, spacing, and label text -- 1 (default) matches the dev tab/door-card previews; a decision-focused view (e.g. DoorTreeChoice) can size up since its depth is capped and doesn't need to stay compact. */
+  scale?: number;
   className?: string;
 }
 
-export function RunTreeView({ tree, rootPath, currentPath, className }: RunTreeViewProps) {
-  const layout = useMemo(() => computeLayout(tree, rootPath), [tree, rootPath]);
+export function RunTreeView({
+  tree,
+  rootPath,
+  currentPath,
+  dimPath,
+  maxDepth,
+  selectableNodes,
+  scale = 1,
+  className,
+}: RunTreeViewProps) {
+  const layout = useMemo(() => computeLayout(tree, rootPath, maxDepth, scale), [tree, rootPath, maxDepth, scale]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Center the viewport on wherever's most relevant -- the current room if
@@ -129,7 +161,11 @@ export function RunTreeView({ tree, rootPath, currentPath, className }: RunTreeV
   if (!layout) return null;
 
   return (
-    <div ref={scrollRef} className={['run-tree-view', className].filter(Boolean).join(' ')}>
+    <div
+      ref={scrollRef}
+      className={['run-tree-view', className].filter(Boolean).join(' ')}
+      style={{ '--rt-scale': scale } as CSSProperties}
+    >
       <div className="run-tree-canvas" style={{ width: layout.width, height: layout.height }}>
         <svg className="run-tree-edges" width={layout.width} height={layout.height}>
           {layout.edgePaths.map((d, i) => (
@@ -146,11 +182,15 @@ export function RunTreeView({ tree, rootPath, currentPath, className }: RunTreeV
           const summary = summarizeRoom(node.room);
           const isCurrent = currentPath === n.path;
           const onPath = currentPath !== undefined && currentPath.startsWith(n.path);
+          const isDimmed = dimPath === n.path;
+          const selectable = selectableNodes?.find((s) => s.path === n.path);
           const classes = [
             'run-tree-node',
             `run-tree-node--${node.room.kind}`,
             onPath ? 'run-tree-node--on-path' : '',
             isCurrent ? 'run-tree-node--current' : '',
+            isDimmed ? 'run-tree-node--dimmed' : '',
+            selectable ? 'run-tree-node--selectable' : '',
           ]
             .filter(Boolean)
             .join(' ');
@@ -159,8 +199,9 @@ export function RunTreeView({ tree, rootPath, currentPath, className }: RunTreeV
             <div
               key={n.path}
               className={classes}
-              style={{ left: n.x, top: n.y }}
+              style={{ left: n.x, top: n.y, ...(selectable?.color ? { background: selectable.color } : {}) }}
               title={summary.detail.join('\n')}
+              onClick={selectable?.onSelect}
             />
           );
         })}
