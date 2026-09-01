@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useRun } from '../../state/runContextObject';
 import type { Card } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { getLegalPlaySets, requiresEnemyTarget, previewPlayerPlay } from '../../engine/combatEngine';
+import type { PotionKind } from '../../types/potions';
+import { getLegalPlaySets, getLegalFreeClaimUses, getLegalSaltUses, requiresEnemyTarget, previewPlayerPlay } from '../../engine/combatEngine';
 import { SUIT_DEFINITIONS, TURN_ANIMATION_DELAY_MS } from '../../config/constants';
 import { useLogPlayback } from '../hooks/useLogPlayback';
 import { MeterBar } from '../components/MeterBar';
@@ -10,6 +11,7 @@ import { TableDisplay } from '../components/TableDisplay';
 import { HandDisplay } from '../components/HandDisplay';
 import { EnemyPanel, StatusBadges } from '../components/EnemyPanel';
 import { PlayControls } from '../components/PlayControls';
+import { PotionControls, type PendingPotion } from '../components/PotionControls';
 import { TurnLogFeed } from '../components/TurnLogFeed';
 
 export function CombatScreen() {
@@ -19,6 +21,11 @@ export function CombatScreen() {
   const [selectedSuit, setSelectedSuit] = useState<SuitId | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedTargetInstanceId, setSelectedTargetInstanceId] = useState<string | null>(null);
+  // Mutually exclusive with the hand-card selection above -- picking a
+  // potion kind clears any in-progress play, and clicking a hand card clears
+  // any in-progress potion (see handleCardClick/handleSelectPotionKind).
+  // Both share the same EnemyPanel click surface for enemy targeting.
+  const [pendingPotion, setPendingPotion] = useState<PendingPotion | null>(null);
 
   // Reset local selection whenever a new turn starts (hand contents change).
   // Adjusted during render (React's documented pattern for resetting state
@@ -29,6 +36,7 @@ export function CombatScreen() {
     setSelectedSuit(null);
     setSelectedIds(new Set());
     setSelectedTargetInstanceId(null);
+    setPendingPotion(null);
   }
 
   // A single dispatched action can drop several log entries at once (e.g. an
@@ -87,8 +95,31 @@ export function CombatScreen() {
     ? !requiresEnemyTarget(SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.category)
     : true;
 
+  const legalFreeClaimUses = canAct ? getLegalFreeClaimUses(combat) : [];
+  const legalSaltUses = canAct ? getLegalSaltUses(combat) : [];
+  const potionNeedsTarget =
+    pendingPotion !== null &&
+    pendingPotion.kind === 'free-claim' &&
+    pendingPotion.suit !== null &&
+    pendingPotion.targetInstanceId === null &&
+    requiresEnemyTarget(SUIT_DEFINITIONS.find((s) => s.id === pendingPotion.suit)!.category);
+  const potionTargetableInstanceIds = potionNeedsTarget
+    ? new Set(
+        legalFreeClaimUses.filter((u) => u.suit === pendingPotion!.suit).map((u) => u.targetInstanceId!),
+      )
+    : new Set<string>();
+  // Both PlayControls and PotionControls share the one EnemyPanel rendered
+  // below -- whichever mode is active (mutually exclusive, see
+  // handleCardClick/handleSelectPotionKind) drives its targetable set.
+  const enemyPanelTargetableInstanceIds = pendingPotion ? potionTargetableInstanceIds : targetableInstanceIds;
+  const enemyPanelSelectedTargetInstanceId = pendingPotion ? pendingPotion.targetInstanceId : selectedTargetInstanceId;
+  const enemyPanelOnSelectTarget = pendingPotion
+    ? (id: string) => setPendingPotion((p) => (p ? { ...p, targetInstanceId: id } : p))
+    : setSelectedTargetInstanceId;
+
   function handleCardClick(card: Card) {
     if (!canAct) return;
+    setPendingPotion(null);
     if (card.kind === 'quake') {
       dispatchCombat({ type: 'PLAYER_PLAY_QUAKE', cardId: card.id });
       return;
@@ -131,6 +162,39 @@ export function CombatScreen() {
     dispatchCombat({ type: 'PLAYER_PASS' });
   }
 
+  function handleSelectPotionKind(kind: PotionKind) {
+    setSelectedSuit(null);
+    setSelectedIds(new Set());
+    setSelectedTargetInstanceId(null);
+    setPendingPotion({ kind, suit: null, targetInstanceId: null });
+  }
+
+  // Same auto-resolve instinct handleCardClick's suit pick uses: if exactly
+  // one (suit, target) pair matches, commit to it immediately; otherwise
+  // (a threat/weaken/poison suit with 2+ alive enemies) leave the target
+  // unset and let needsTarget below prompt an EnemyPanel click.
+  function handleSelectPotionSuit(suit: SuitId) {
+    if (!pendingPotion) return;
+    const source = pendingPotion.kind === 'free-claim' ? legalFreeClaimUses : legalSaltUses;
+    const matches = source.filter((u) => u.suit === suit);
+    const targetInstanceId = matches.length === 1 ? (matches[0].targetInstanceId ?? null) : null;
+    setPendingPotion({ ...pendingPotion, suit, targetInstanceId });
+  }
+
+  function handleConfirmPotion() {
+    if (!pendingPotion || !pendingPotion.suit) return;
+    if (pendingPotion.kind === 'free-claim') {
+      dispatchCombat({
+        type: 'USE_FREE_CLAIM_POTION',
+        suit: pendingPotion.suit,
+        targetInstanceId: pendingPotion.targetInstanceId ?? undefined,
+      });
+    } else {
+      dispatchCombat({ type: 'USE_SALT_POTION', suit: pendingPotion.suit });
+    }
+    setPendingPotion(null);
+  }
+
   // Built from the same magnitude/rider math performPlay itself uses (see
   // previewPlayerPlay), so this can never drift from what actually resolves
   // -- includes Strength/Weaken (threat plays only) and every selected
@@ -152,9 +216,9 @@ export function CombatScreen() {
       <div className="combat-combatants">
         <EnemyPanel
           enemies={combat.enemies}
-          targetableInstanceIds={targetableInstanceIds}
-          selectedTargetInstanceId={selectedTargetInstanceId}
-          onSelectTarget={setSelectedTargetInstanceId}
+          targetableInstanceIds={enemyPanelTargetableInstanceIds}
+          selectedTargetInstanceId={enemyPanelSelectedTargetInstanceId}
+          onSelectTarget={enemyPanelOnSelectTarget}
         />
         <div className="player-panel">
           <h3>You</h3>
@@ -191,6 +255,20 @@ export function CombatScreen() {
               hasPlaysLeft={hasPlaysLeft}
               onPlay={handlePlay}
               onPass={handlePass}
+            />
+          )}
+          {combat.status === 'active' && (
+            <PotionControls
+              potions={combat.potions}
+              legalFreeClaimUses={legalFreeClaimUses}
+              legalSaltUses={legalSaltUses}
+              canAct={canAct}
+              pending={pendingPotion}
+              needsTarget={potionNeedsTarget}
+              onSelectKind={handleSelectPotionKind}
+              onSelectSuit={handleSelectPotionSuit}
+              onConfirm={handleConfirmPotion}
+              onCancel={() => setPendingPotion(null)}
             />
           )}
         </div>

@@ -17,8 +17,8 @@
 //
 // Usage: npx tsx scripts/playtest-sim.ts [numRuns] [startSeed]
 //        PLAYTEST_BOT=llm npx tsx scripts/playtest-sim.ts 1 1
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor, restHeal, restRemoveCard } from '../src/engine/runEngine.ts';
-import { getLegalPlaySets, type LegalPlayTarget } from '../src/engine/combatEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor, restHeal, restRemoveCard, chooseRelic, skipShrine } from '../src/engine/runEngine.ts';
+import { getLegalPlaySets, getLegalFreeClaimUses, getLegalSaltUses, type LegalPlayTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
 import { pickLlmPlay, llmStats, type LlmChosenPlay } from './llmBot.ts';
 import type { RunState } from '../src/types/run.ts';
@@ -57,6 +57,13 @@ interface Metrics {
   restRoomsSeen: number;
   restHealsChosen: number;
   restRemovesChosen: number;
+  shrinesSeen: number;
+  relicsAcquired: number;
+  relicsHeldAtRunEnd: number[];
+  potionsAcquired: number;
+  freeClaimUsed: number;
+  saltUsed: number;
+  potionsHeldAtRunEnd: number[];
 }
 
 function freshMetrics(): Metrics {
@@ -82,6 +89,13 @@ function freshMetrics(): Metrics {
     restRoomsSeen: 0,
     restHealsChosen: 0,
     restRemovesChosen: 0,
+    shrinesSeen: 0,
+    relicsAcquired: 0,
+    relicsHeldAtRunEnd: [],
+    potionsAcquired: 0,
+    freeClaimUsed: 0,
+    saltUsed: 0,
+    potionsHeldAtRunEnd: [],
   };
 }
 
@@ -106,6 +120,11 @@ interface ScoredPlay {
 // out "the bot just doesn't defend" as the explanation for a low survival
 // rate before blaming the game's balance).
 const PROFILE = (process.env.PLAYTEST_PROFILE ?? 'aggro') as 'aggro' | 'defensive';
+
+// Salt is only used defensively, once a room-owned pile has grown at least
+// this big -- below that it reads as routine table noise, not a threat
+// worth spending the item on.
+const SALT_THRESHOLD = 6;
 
 function pickBestPlay(state: CombatState, targets: LegalPlayTarget[]): ScoredPlay | null {
   const bySuit = new Map<SuitId, LegalPlayTarget[]>();
@@ -172,7 +191,9 @@ function pickBestPlay(state: CombatState, targets: LegalPlayTarget[]): ScoredPla
 // consistency bias, not a solver. Doors don't signal reward suits, so this
 // is the only signal available. Quake scores as an average suit's worth,
 // since it's neither clearly better nor worse than another copy of whatever
-// suit is already well-represented.
+// suit is already well-represented. A relic option always wins -- a
+// run-long passive is assumed strictly worth taking over one more deck card
+// for this baseline bot.
 function pickReward(run: RunState): string {
   const options = run.rewardOptions!;
   const suitCounts = new Map<SuitId, number>();
@@ -182,16 +203,34 @@ function pickReward(run: RunState): string {
   }
   const avgCount = suitCounts.size > 0 ? run.deck.length / suitCounts.size : 1;
 
+  const relicOption = options.find((opt) => opt.optionType === 'relic');
+  if (relicOption) return relicOption.id;
+
+  // A potion is a discrete, free-action item (never competing with the
+  // play/hand economy -- see MECHANIC_BRAINSTORM.md's "Potions" entry), so
+  // it beats an ordinary card the same "assumed worth it" way a relic does,
+  // just one tier below since it's consumed rather than permanent.
+  const potionOption = options.find((opt) => opt.optionType === 'potion');
+  if (potionOption) return potionOption.id;
+
   let bestId = options[0].id;
   let bestScore = -Infinity;
   for (const opt of options) {
-    const score = opt.kind === 'quake' ? avgCount : (suitCounts.get(opt.suit) ?? 0);
+    if (opt.optionType !== 'card') continue;
+    const score = opt.card.kind === 'quake' ? avgCount : (suitCounts.get(opt.card.suit) ?? 0);
     if (score > bestScore) {
       bestScore = score;
       bestId = opt.id;
     }
   }
   return bestId;
+}
+
+// Shrine-pick heuristic: always take the first offered relic -- same
+// "assumed strictly worth it" reasoning pickReward's relic branch uses.
+function pickShrine(run: RunState): string | null {
+  const options = run.shrineOptions!;
+  return options[0]?.id ?? null;
 }
 
 /**
@@ -266,6 +305,27 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
       return { ...next, phase: 'run-over' as const };
     }
     const state = next.combat;
+
+    // Free Claim is strictly free value (no play/hand cost) -- drain the
+    // biggest available use opportunistically before any other decision
+    // this turn. It's a free action (see combatEngine.ts), so looping back
+    // to the top immediately re-evaluates the next decision.
+    const freeClaimUses = getLegalFreeClaimUses(state);
+    if (freeClaimUses.length > 0) {
+      const best = freeClaimUses.reduce((a, b) => (b.amount > a.amount ? b : a));
+      next = applyCombatAction(next, { type: 'USE_FREE_CLAIM_POTION', suit: best.suit, targetInstanceId: best.targetInstanceId });
+      m.freeClaimUsed++;
+      continue;
+    }
+    // Salt only defensively, once a room-owned pile crosses SALT_THRESHOLD.
+    const saltUses = getLegalSaltUses(state).filter((u) => u.amount >= SALT_THRESHOLD);
+    if (saltUses.length > 0) {
+      const best = saltUses.reduce((a, b) => (b.amount > a.amount ? b : a));
+      next = applyCombatAction(next, { type: 'USE_SALT_POTION', suit: best.suit });
+      m.saltUsed++;
+      continue;
+    }
+
     // Quake is auto-played the moment it's in hand regardless of bot mode --
     // it never expires within the turn and only ever adds plays, so there's
     // no decision here for either bot to make.
@@ -365,7 +425,13 @@ async function playRun(seed: number): Promise<void> {
   let roomsCleared = 0;
   let safety = 0;
 
-  while (run.phase === 'combat' || run.phase === 'rest' || run.phase === 'reward' || run.phase === 'door-choice') {
+  while (
+    run.phase === 'combat' ||
+    run.phase === 'rest' ||
+    run.phase === 'shrine' ||
+    run.phase === 'reward' ||
+    run.phase === 'door-choice'
+  ) {
     if (safety++ > 400) {
       m.anomalies++;
       return;
@@ -382,8 +448,23 @@ async function playRun(seed: number): Promise<void> {
       }
       continue;
     }
+    if (run.phase === 'shrine') {
+      m.shrinesSeen++;
+      const relicId = pickShrine(run);
+      if (relicId) {
+        m.relicsAcquired++;
+        run = chooseRelic(run, relicId);
+      } else {
+        run = skipShrine(run);
+      }
+      continue;
+    }
     if (run.phase === 'reward') {
-      run = chooseReward(run, pickReward(run));
+      const optionId = pickReward(run);
+      const optionType = run.rewardOptions!.find((o) => o.id === optionId)?.optionType;
+      if (optionType === 'relic') m.relicsAcquired++;
+      if (optionType === 'potion') m.potionsAcquired++;
+      run = chooseReward(run, optionId);
       continue;
     }
     if (run.phase === 'door-choice') {
@@ -427,6 +508,8 @@ async function playRun(seed: number): Promise<void> {
   m.runs++;
   m.roomsClearedPerRun.push(roomsCleared);
   m.depthReached.push(run.depth);
+  m.relicsHeldAtRunEnd.push(run.relics.length);
+  m.potionsHeldAtRunEnd.push(run.potions.length);
   if (run.phase === 'run-complete') m.wins++;
   else if (run.phase === 'run-over') m.losses++;
   else m.anomalies++;
@@ -498,6 +581,18 @@ const report = {
     perRun: Number((m.restRoomsSeen / m.runs).toFixed(2)),
     healsChosen: m.restHealsChosen,
     removesChosen: m.restRemovesChosen,
+  },
+  shrines: {
+    seen: m.shrinesSeen,
+    perRun: Number((m.shrinesSeen / m.runs).toFixed(2)),
+    relicsAcquired: m.relicsAcquired,
+    relicsHeldAtRunEnd: stats(m.relicsHeldAtRunEnd),
+  },
+  potions: {
+    acquired: m.potionsAcquired,
+    freeClaimUsed: m.freeClaimUsed,
+    saltUsed: m.saltUsed,
+    heldAtRunEnd: stats(m.potionsHeldAtRunEnd),
   },
 };
 

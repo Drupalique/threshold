@@ -199,6 +199,17 @@ export const DOOR_CORRELATION_RATE = 0.75;
 // doors offered (not guaranteed taken).
 export const REST_ROOM_RATIO = 0.15;
 
+// Independent per-door-candidate odds that a door leads to a shrine (a
+// relic-offer stop, see types/room.ts's ShrineRoomInstance) instead of a
+// combat room -- rolled alongside REST_ROOM_RATIO, same never-on-the-final-
+// floor exclusion. Rarer than rest rooms since a relic is a bigger, run-long
+// find than a heal/card-removal choice. First-cut number, not balance-tested.
+export const SHRINE_ROOM_RATIO = 0.08;
+
+// How many relic options a shrine offers at once -- see
+// rewardGenerator.ts's generateShrineOptions.
+export const SHRINE_OPTION_COUNT = 2;
+
 // Fraction of playerHPMax a rest room's "Rest" option restores (rounded,
 // capped at playerHPMax) -- the fix for the no-in-run-HP-recovery gap
 // (GAME_DESIGN.md §7/§10). First-cut number, not balance-tested.
@@ -269,6 +280,26 @@ export const QUAKE_BONUS_PLAYS = 3;
 // smaller, non-permanent-turn-warping bonus, but still meaningfully rarer
 // than an ordinary suit pick so it reads as a notable find.
 export const SPECIAL_REWARD_RATIO = 0.15;
+
+// Odds a reward offer's slot is a relic (config/relics.ts) instead of an
+// ordinary suited one -- rarer than a special card since a relic is a
+// run-long passive rather than one deck card, but still available from the
+// reward screen (not just a shrine) so relics aren't gated behind RNG luck
+// on shrine doors alone.
+export const RELIC_REWARD_RATIO = 0.1;
+
+// Odds a reward offer's slot is a potion (config/potions.ts) instead of an
+// ordinary suited one -- same tier as RELIC_REWARD_RATIO (a bit below it):
+// a potion is a consumable, not a permanent find, but it's still a discrete
+// item rather than one more deck card.
+export const POTION_REWARD_RATIO = 0.1;
+
+// Combined cap across every held potion kind -- once RunState.potions.length
+// reaches this, the reward screen stops offering potions at all (see
+// rewardGenerator.ts's generateRewardOptions), same "already at the ceiling"
+// shape unheldRelics gives relics, just count-based since potions (unlike
+// relics) can duplicate. First-cut number, not balance-tested.
+export const POTION_INVENTORY_CAP = 4;
 
 export const REWARD_OPTION_COUNT = 3;
 

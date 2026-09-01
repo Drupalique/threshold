@@ -9,11 +9,23 @@ export function RewardScreen() {
     <div className="reward-screen">
       <h2>Room {state.depth} cleared -- choose a card for your deck</h2>
       <div className="reward-choices">
-        {options.map((card) => (
-          <div key={card.id} className="reward-choice">
-            <CardChip card={card} onClick={() => chooseReward(card.id)} />
-          </div>
-        ))}
+        {options.map((option) =>
+          option.optionType === 'card' ? (
+            <div key={option.id} className="reward-choice">
+              <CardChip card={option.card} onClick={() => chooseReward(option.id)} />
+            </div>
+          ) : option.optionType === 'relic' ? (
+            <div key={option.id} className="reward-choice reward-choice--relic" onClick={() => chooseReward(option.id)}>
+              <h3>{option.relic.name}</h3>
+              <p>{option.relic.description}</p>
+            </div>
+          ) : (
+            <div key={option.id} className="reward-choice reward-choice--potion" onClick={() => chooseReward(option.id)}>
+              <h3>{option.potion.name}</h3>
+              <p>{option.potion.description}</p>
+            </div>
+          ),
+        )}
       </div>
       {/* Screen-level pass, not a per-card decline -- every reward on offer
           here is optional, and this is the one exit once you've taken

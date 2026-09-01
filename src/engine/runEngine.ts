@@ -5,7 +5,7 @@ import type { CombatAction } from '../types/combat';
 import { createRng } from './rng';
 import { buildRunTree } from './runTree';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
-import { generateRewardOptions } from './rewardGenerator';
+import { generateRewardOptions, generateShrineOptions } from './rewardGenerator';
 import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
 
 export function createNewRun(seed: number): RunState {
@@ -20,7 +20,10 @@ export function createNewRun(seed: number): RunState {
     playerHPMax: PLAYER_HP_MAX,
     phase: 'start',
     deck: [...STARTER_DECK],
+    relics: [],
+    potions: [],
     rewardOptions: null,
+    shrineOptions: null,
     currentDoors: null,
     combat: null,
   };
@@ -30,7 +33,7 @@ export function startFirstRoom(run: RunState): RunState {
   const node = run.runTree.nodes[run.currentPath];
   // The floor-1 root is always a combat room (see runTree.ts's buildRunTree
   // -- the very first room has no door choice, so it can never roll rest).
-  const combat = initCombat(node.room as CombatRoomInstance, run.rng, run.playerHP, run.playerHPMax, run.deck);
+  const combat = initCombat(node.room as CombatRoomInstance, run.rng, run.playerHP, run.playerHPMax, run.deck, run.relics, run.potions);
   return { ...run, phase: 'combat', combat };
 }
 
@@ -45,7 +48,7 @@ export function startFirstRoom(run: RunState): RunState {
 export function applyCombatAction(run: RunState, action: CombatAction): RunState {
   if (!run.combat || run.phase !== 'combat') return run;
   const nextCombat = combatApplyAction(run.combat, action, run.rng);
-  return { ...run, combat: nextCombat, playerHP: nextCombat.playerHP };
+  return { ...run, combat: nextCombat, playerHP: nextCombat.playerHP, potions: nextCombat.potions };
 }
 
 /**
@@ -69,7 +72,7 @@ export function resolveCombatEnd(run: RunState): RunState {
     return { ...run, depth: newDepth, phase: 'run-complete' };
   }
 
-  const rewardOptions = generateRewardOptions(newDepth, run.rng);
+  const rewardOptions = generateRewardOptions(newDepth, run.rng, run.relics, run.potions);
   return { ...run, depth: newDepth, phase: 'reward', rewardOptions };
 }
 
@@ -91,13 +94,19 @@ function proceedToDoors(run: RunState): RunState {
   return { ...run, phase: 'door-choice', currentDoors: doors };
 }
 
-/** Appends the chosen reward card to the persistent deck, then proceeds to door generation. */
-export function chooseReward(run: RunState, cardId: string): RunState {
+/** Appends the chosen reward option to the persistent deck or held relics (per its optionType), then proceeds to door generation. */
+export function chooseReward(run: RunState, optionId: string): RunState {
   if (run.phase !== 'reward' || !run.rewardOptions) return run;
-  const chosen = run.rewardOptions.find((c) => c.id === cardId);
+  const chosen = run.rewardOptions.find((o) => o.id === optionId);
   if (!chosen) return run;
 
-  return proceedToDoors({ ...run, deck: [...run.deck, chosen], rewardOptions: null });
+  const next =
+    chosen.optionType === 'card'
+      ? { ...run, deck: [...run.deck, chosen.card] }
+      : chosen.optionType === 'relic'
+        ? { ...run, relics: [...run.relics, chosen.relic] }
+        : { ...run, potions: [...run.potions, chosen.potion] };
+  return proceedToDoors({ ...next, rewardOptions: null });
 }
 
 /**
@@ -134,19 +143,27 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
     return { ...base, phase: 'rest' as const, combat: null };
   }
 
-  const combat = initCombat(node.room, run.rng, run.playerHP, run.playerHPMax, run.deck);
+  if (node.room.kind === 'shrine') {
+    // Generated live off run.rng, not precomputed in the tree -- see
+    // types/room.ts's ShrineRoomInstance for why (it must exclude relics
+    // the player already holds by the time they arrive).
+    const shrineOptions = generateShrineOptions(run.rng, run.relics);
+    return { ...base, phase: 'shrine' as const, combat: null, shrineOptions };
+  }
+
+  const combat = initCombat(node.room, run.rng, run.playerHP, run.playerHPMax, run.deck, run.relics, run.potions);
   return { ...base, phase: 'combat' as const, combat };
 }
 
 /**
- * Shared tail for both rest options -- a rest room never grants a card
+ * Shared tail for both rest and shrine rooms -- neither grants a card
  * reward (unlike clearing a combat room), so this advances depth and goes
  * straight to door generation, skipping the 'reward' phase entirely. Also
- * guards the (currently unreachable, since REST_ROOM_RATIO's roll is
- * skipped once floor >= RUN_MAX_DEPTH) case of a rest room landing on the
- * run's last room, same defensive shape as resolveCombatEnd.
+ * guards the (currently unreachable, since REST_ROOM_RATIO/SHRINE_ROOM_RATIO's
+ * roll is skipped once floor >= RUN_MAX_DEPTH) case of a side room landing on
+ * the run's last room, same defensive shape as resolveCombatEnd.
  */
-function finishRestRoom(run: RunState): RunState {
+function finishSideRoom(run: RunState): RunState {
   const newDepth = run.depth + 1;
   if (newDepth >= run.maxDepth) {
     return { ...run, depth: newDepth, phase: 'run-complete' };
@@ -159,7 +176,7 @@ export function restHeal(run: RunState): RunState {
   if (run.phase !== 'rest') return run;
   const healAmount = Math.round(run.playerHPMax * REST_HEAL_PCT);
   const playerHP = Math.min(run.playerHPMax, run.playerHP + healAmount);
-  return finishRestRoom({ ...run, playerHP });
+  return finishSideRoom({ ...run, playerHP });
 }
 
 /** Permanently removes one card (by its unique id) from the persistent deck and leaves the rest room. Exclusive with restHeal -- see RestScreen.tsx. */
@@ -167,5 +184,19 @@ export function restRemoveCard(run: RunState, cardId: string): RunState {
   if (run.phase !== 'rest') return run;
   if (!run.deck.some((c) => c.id === cardId)) return run;
   const deck = run.deck.filter((c) => c.id !== cardId);
-  return finishRestRoom({ ...run, deck });
+  return finishSideRoom({ ...run, deck });
+}
+
+/** Adds the chosen relic (by id) to the persistent held-relics list and leaves the shrine. Exclusive with skipShrine -- see ShrineScreen.tsx. */
+export function chooseRelic(run: RunState, relicId: string): RunState {
+  if (run.phase !== 'shrine' || !run.shrineOptions) return run;
+  const chosen = run.shrineOptions.find((r) => r.id === relicId);
+  if (!chosen) return run;
+  return finishSideRoom({ ...run, relics: [...run.relics, chosen], shrineOptions: null });
+}
+
+/** Leaves the shrine with no relic taken -- the general "I'm done here" exit, same shape as skipReward. */
+export function skipShrine(run: RunState): RunState {
+  if (run.phase !== 'shrine') return run;
+  return finishSideRoom({ ...run, shrineOptions: null });
 }

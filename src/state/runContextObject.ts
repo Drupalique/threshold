@@ -11,6 +11,8 @@ export interface RunContextValue {
   skipReward: () => void;
   restHeal: () => void;
   restRemoveCard: (cardId: string) => void;
+  chooseRelic: (relicId: string) => void;
+  skipShrine: () => void;
   chooseDoor: (doorId: string) => void;
   restart: () => void;
 }

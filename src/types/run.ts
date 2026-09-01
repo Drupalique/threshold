@@ -1,6 +1,8 @@
 import type { CombatState } from './combat';
 import type { Door } from './door';
 import type { Card } from './cards';
+import type { RelicDef } from './relics';
+import type { PotionDef } from './potions';
 import type { Rng } from '../engine/rng';
 import type { RunTree } from './runTree';
 
@@ -9,9 +11,18 @@ export type RunPhase =
   | 'combat'
   | 'rest'
   | 'reward'
+  | 'shrine'
   | 'door-choice'
   | 'run-complete'
   | 'run-over';
+
+// A reward-screen slot is a card, a relic, or a potion -- tagged with
+// optionType rather than reusing Card.kind ('creature'/'quake'), which is a
+// different axis (what kind of card) than this (card vs relic vs potion).
+export type RewardOption =
+  | { id: string; optionType: 'card'; card: Card }
+  | { id: string; optionType: 'relic'; relic: RelicDef }
+  | { id: string; optionType: 'potion'; potion: PotionDef };
 
 export interface RunState {
   seed: number;
@@ -28,9 +39,24 @@ export interface RunState {
   // carries a player's hand contents across rooms; RoomInstance no longer
   // deals a hand of its own.
   deck: Card[];
+  // Persistent, run-level held relics (see types/relics.ts) -- grown by
+  // chooseReward's relic branch and chooseRelic, never shrinks (no
+  // duplicates are ever offered once a relic is held, see rewardGenerator.ts
+  // and generateShrineOptions). Copied into CombatState.relics at initCombat
+  // so combatEngine.ts's applyRelics can read it without extra plumbing.
+  relics: RelicDef[];
+  // Persistent, run-level held potions (see types/potions.ts) -- grown by
+  // chooseReward's potion branch, shrunk by combat's USE_FREE_CLAIM_POTION/
+  // USE_SALT_POTION actions (synced back out of CombatState.potions by
+  // runEngine.ts's applyCombatAction the same way playerHP is). Unlike
+  // relics, duplicates are allowed and a used potion is actually consumed.
+  potions: PotionDef[];
   // Set by resolveCombatEnd's room-cleared branch, consumed by chooseReward.
   // Null outside the 'reward' phase.
-  rewardOptions: Card[] | null;
+  rewardOptions: RewardOption[] | null;
+  // Set by chooseDoor's shrine branch, consumed by chooseRelic/skipShrine.
+  // Null outside the 'shrine' phase.
+  shrineOptions: RelicDef[] | null;
   // The entire run's precomputed branching structure (see types/runTree.ts,
   // engine/runTree.ts's buildRunTree) -- built once from the seed at
   // createNewRun and held for the run's whole lifetime, not just the path

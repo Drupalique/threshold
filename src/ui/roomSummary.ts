@@ -16,6 +16,10 @@ export function summarizeRoom(room: RoomInstance): RoomSummary {
     return { label: 'Rest', detail: ['Rest room -- heal or remove a card'] };
   }
 
+  if (room.kind === 'shrine') {
+    return { label: 'Shrine', detail: ['Shrine -- choose a relic'] };
+  }
+
   const names = room.enemies.map((e) => `${e.name}${e.isElite ? ' (Elite)' : ''} (${e.hpMax} HP)`);
   const label =
     room.enemies.length === 1

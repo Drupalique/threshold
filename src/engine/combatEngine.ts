@@ -3,6 +3,8 @@ import type { Card, CreatureCard } from '../types/cards';
 import type { EnemyInstance } from '../types/enemy';
 import type { CombatRoomInstance } from '../types/room';
 import type { StatusBag, StatusId } from '../types/status';
+import type { RelicDef } from '../types/relics';
+import type { PotionDef, PotionKind } from '../types/potions';
 import type {
   CombatAction,
   CombatState,
@@ -85,6 +87,8 @@ export function initCombat(
   playerHP: number,
   playerHPMax: number,
   playerDeck: Card[],
+  relics: RelicDef[] = [],
+  potions: PotionDef[] = [],
 ): CombatState {
   const snapshot: MeterSnapshot = { playerHP, playerHPMax, playerGuard: 0 };
   const enemyList = room.enemies.map((e) => `${e.name} (${e.hp} HP)`).join(', ');
@@ -127,6 +131,8 @@ export function initCombat(
     playsRemaining: PLAYS_PER_TURN_BASE,
     log: [makeLog(0, 'system', 'round-start', `Threat looms: ${enemyList}. The room deals its neutral hand onto the table.`, snapshot)],
     status: 'active',
+    relics,
+    potions,
   };
 }
 
@@ -162,6 +168,51 @@ export function getLegalPlaySets(state: CombatState): LegalPlayTarget[] {
     }
   }
   return targets;
+}
+
+export interface LegalPotionUse {
+  suit: SuitId;
+  targetInstanceId?: string;
+  // The flat amount a potion use would resolve/discard -- Free Claim's
+  // table total (every owner combined) or Salt's room-owned count, per
+  // getLegalFreeClaimUses/getLegalSaltUses below. Always > 0: a potion use
+  // with nothing to act on isn't offered as legal.
+  amount: number;
+}
+
+/** Every (suit, target) a held Free Claim potion could legally resolve right now -- mirrors getLegalPlaySets' shape, but reads state.table (every owner's cards) instead of the hand, and requires holding a 'free-claim' potion. */
+export function getLegalFreeClaimUses(state: CombatState): LegalPotionUse[] {
+  if (state.activeTurn !== 'player' || state.status !== 'active') return [];
+  if (!state.potions.some((p) => p.kind === 'free-claim')) return [];
+
+  const suits = new Set(state.table.map((c) => c.suit));
+  const uses: LegalPotionUse[] = [];
+  for (const suit of suits) {
+    const amount = countTableSetSize(state.table, suit);
+    if (amount <= 0) continue;
+    if (requiresEnemyTarget(suitCategory(suit))) {
+      for (const enemy of state.enemies) {
+        uses.push({ suit, targetInstanceId: enemy.instanceId, amount });
+      }
+    } else {
+      uses.push({ suit, amount });
+    }
+  }
+  return uses;
+}
+
+/** Every suit a held Salt potion could legally discard the room's own pile of right now -- only ever the room-owned count, never the player's/an enemy's own contribution (see claimRoomCards). */
+export function getLegalSaltUses(state: CombatState): LegalPotionUse[] {
+  if (state.activeTurn !== 'player' || state.status !== 'active') return [];
+  if (!state.potions.some((p) => p.kind === 'salt')) return [];
+
+  const roomSuits = new Set(state.table.filter((c) => c.ownerId === 'room').map((c) => c.suit));
+  const uses: LegalPotionUse[] = [];
+  for (const suit of roomSuits) {
+    const amount = state.table.filter((c) => c.suit === suit && c.ownerId === 'room').length;
+    if (amount > 0) uses.push({ suit, amount });
+  }
+  return uses;
 }
 
 export interface PlayPreview {
@@ -436,6 +487,7 @@ function performPlay(
   };
 
   next = applyRiders(next, actor, targetInstanceId, playedCards);
+  next = applyRelics(next, actor, category, suit, targetInstanceId);
 
   return next;
 }
@@ -520,6 +572,237 @@ function applyRiders(
   }
 
   return next;
+}
+
+/**
+ * Fires every held relic (config/relics.ts) whose scope matches the suit/
+ * category just played -- runs after applyRiders, same reasoning: a relic
+ * never touches the magnitude formula, it just layers a flat bonus on top
+ * of an already-resolved play. rider-bonus relics reuse applyRiders' own
+ * bonus-damage (enemy-or-player-targeted)/bonus-guard (self-targeted) split;
+ * status-on-claim relics reuse performPlay's own addStacks calls, targeting
+ * whatever the play's own category already targets (an enemy for
+ * threat/weaken/poison, self for boon/guard/strength).
+ */
+function applyRelics(
+  state: CombatState,
+  actor: Actor,
+  category: SuitCategory,
+  suit: SuitId,
+  targetInstanceId: string | undefined,
+): CombatState {
+  let next = state;
+  const actorName = actorNameOf(state, actor);
+
+  for (const relic of state.relics) {
+    if (relic.effect.kind === 'rider-bonus') {
+      const { scope, riderKind, amount } = relic.effect;
+      const matches = scope.by === 'suit' ? scope.suit === suit : scope.category === category;
+      if (!matches) continue;
+
+      if (riderKind === 'bonus-damage') {
+        if (actor.kind === 'player') {
+          const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
+          if (enemy) {
+            const result = absorbDamage(enemy.hp, enemy.guard, amount);
+            const dealt = enemy.hp - result.hp;
+            const survives = result.hp > 0;
+            next = {
+              ...next,
+              enemies: survives
+                ? next.enemies.map((e) => (e.instanceId === enemy.instanceId ? { ...e, hp: result.hp, guard: result.guard } : e))
+                : next.enemies.filter((e) => e.instanceId !== enemy.instanceId),
+            };
+            let msg = `${relic.name} also deals ${dealt} damage to ${enemy.name}${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
+            if (!survives) msg += ` ${enemy.name} is defeated!`;
+            next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'player', 'relic', msg, snapshotOf(next))] };
+          }
+        } else {
+          const result = absorbDamage(next.playerHP, next.playerGuard, amount);
+          const dealt = next.playerHP - result.hp;
+          next = { ...next, playerHP: result.hp, playerGuard: result.guard };
+          const msg = `${actorName}'s ${relic.name} also deals ${dealt} damage to you${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
+          next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'enemy', 'relic', msg, snapshotOf(next))] };
+        }
+      } else {
+        // bonus-guard -- always self-targeted, same as applyRiders' own split.
+        if (actor.kind === 'player') {
+          next = { ...next, playerGuard: next.playerGuard + amount };
+          next = {
+            ...next,
+            log: [...next.log, makeLog(next.turnNumber, 'player', 'relic', `${relic.name} also raises Guard to ${next.playerGuard}.`, snapshotOf(next))],
+          };
+        } else {
+          next = updateEnemy(next, actor.instanceId, (e) => ({ ...e, guard: e.guard + amount }));
+          const newGuard = next.enemies.find((e) => e.instanceId === actor.instanceId)!.guard;
+          next = {
+            ...next,
+            log: [...next.log, makeLog(next.turnNumber, 'enemy', 'relic', `${actorName}'s ${relic.name} also raises Guard to ${newGuard}.`, snapshotOf(next))],
+          };
+        }
+      }
+    } else {
+      // status-on-claim
+      if (relic.effect.suit !== suit) continue;
+      const { statusId, amount } = relic.effect;
+      const selfTargeting = category === 'boon' || category === 'guard' || category === 'strength';
+
+      if (selfTargeting) {
+        if (actor.kind === 'player') {
+          next = { ...next, playerStatuses: addStacks(next.playerStatuses, statusId, amount) };
+          const totalStacks = stacksOf(next.playerStatuses, statusId);
+          next = {
+            ...next,
+            log: [
+              ...next.log,
+              makeLog(next.turnNumber, 'player', 'relic', `${relic.name} also grants you +${amount} ${STATUS_DEFS[statusId].name} (${totalStacks} stack${totalStacks === 1 ? '' : 's'}).`, snapshotOf(next)),
+            ],
+          };
+        } else {
+          next = updateEnemy(next, actor.instanceId, (e) => ({ ...e, statuses: addStacks(e.statuses, statusId, amount) }));
+          const totalStacks = stacksOf(next.enemies.find((e) => e.instanceId === actor.instanceId)!.statuses, statusId);
+          next = {
+            ...next,
+            log: [
+              ...next.log,
+              makeLog(next.turnNumber, 'enemy', 'relic', `${actorName}'s ${relic.name} also grants +${amount} ${STATUS_DEFS[statusId].name} (${totalStacks} stack${totalStacks === 1 ? '' : 's'}).`, snapshotOf(next)),
+            ],
+          };
+        }
+      } else {
+        if (actor.kind === 'player') {
+          const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
+          if (enemy) {
+            next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, statuses: addStacks(e.statuses, statusId, amount) }));
+            const totalStacks = stacksOf(next.enemies.find((e) => e.instanceId === enemy.instanceId)!.statuses, statusId);
+            next = {
+              ...next,
+              log: [
+                ...next.log,
+                makeLog(next.turnNumber, 'player', 'relic', `${relic.name} also inflicts +${amount} ${STATUS_DEFS[statusId].name} on ${enemy.name} (${totalStacks} stack${totalStacks === 1 ? '' : 's'}).`, snapshotOf(next)),
+              ],
+            };
+          }
+        } else {
+          next = { ...next, playerStatuses: addStacks(next.playerStatuses, statusId, amount) };
+          const totalStacks = stacksOf(next.playerStatuses, statusId);
+          next = {
+            ...next,
+            log: [
+              ...next.log,
+              makeLog(next.turnNumber, 'enemy', 'relic', `${actorName}'s ${relic.name} also inflicts +${amount} ${STATUS_DEFS[statusId].name} on you (${totalStacks} stack${totalStacks === 1 ? '' : 's'}).`, snapshotOf(next)),
+            ],
+          };
+        }
+      }
+    }
+  }
+
+  return next;
+}
+
+// --- Potions ---------------------------------------------------------------
+// Free Claim and Salt (config/potions.ts) both act directly on
+// state.table/claimRoomCards, deliberately outside the play system: no
+// played cards, no discard, no rider, no relic hook, no Strength/Weaken --
+// see MECHANIC_BRAINSTORM.md's "Potions" entry for why that's the point.
+// Always player-actor only (no enemy analog), always a free action (no play
+// spent, turn doesn't end -- see applyCombatAction's dispatch below).
+
+function removeOnePotion(potions: PotionDef[], kind: PotionKind): PotionDef[] {
+  const idx = potions.findIndex((p) => p.kind === kind);
+  if (idx === -1) return potions;
+  return [...potions.slice(0, idx), ...potions.slice(idx + 1)];
+}
+
+/**
+ * Resolves `amount` (the suit's current table total, every owner combined --
+ * see getLegalFreeClaimUses) directly as the suit's category effect, the
+ * same threat/boon/guard/weaken-poison/strength split performPlay's own
+ * switch uses, but flat -- no hand-count multiplier, no Strength/Weaken
+ * folded in. Claims the room's own matching cards (claimRoomCards) the same
+ * way a real play would, but never appends new table cards (there's no
+ * played set backing this).
+ */
+function resolveFreeClaimEffect(
+  state: CombatState,
+  suit: SuitId,
+  targetInstanceId: string | undefined,
+  amount: number,
+): CombatState {
+  const category = suitCategory(suit);
+  let next: CombatState = { ...state, table: claimRoomCards(state.table, suit) };
+  let effectDesc: string;
+  let targetName: string | undefined;
+
+  if (category === 'threat') {
+    const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId)!;
+    targetName = enemy.name;
+    const result = absorbDamage(enemy.hp, enemy.guard, amount);
+    const dealt = enemy.hp - result.hp;
+    const survives = result.hp > 0;
+    next = {
+      ...next,
+      enemies: survives
+        ? next.enemies.map((e) => (e.instanceId === enemy.instanceId ? { ...e, hp: result.hp, guard: result.guard } : e))
+        : next.enemies.filter((e) => e.instanceId !== enemy.instanceId),
+    };
+    effectDesc =
+      result.absorbed > 0
+        ? `dealing ${amount} -- Guard absorbs ${result.absorbed}, ${dealt} gets through`
+        : `dealing ${dealt} to ${enemy.name}`;
+    if (!survives) effectDesc += ` -- ${enemy.name} is defeated!`;
+  } else if (category === 'boon') {
+    next = { ...next, playerHP: Math.min(state.playerHPMax, next.playerHP + amount) };
+    effectDesc = `healing ${amount} HP`;
+  } else if (category === 'guard') {
+    next = { ...next, playerGuard: next.playerGuard + amount };
+    effectDesc = `raising Guard to ${next.playerGuard}`;
+  } else if (category === 'weaken' || category === 'poison') {
+    const statusId: StatusId = category;
+    const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId)!;
+    targetName = enemy.name;
+    next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, statuses: addStacks(e.statuses, statusId, amount) }));
+    const totalStacks = stacksOf(next.enemies.find((e) => e.instanceId === enemy.instanceId)!.statuses, statusId);
+    effectDesc = `inflicting +${amount} ${STATUS_DEFS[statusId].name} on ${enemy.name} (${totalStacks} stack${totalStacks === 1 ? '' : 's'})`;
+  } else {
+    // strength: self-buff.
+    next = { ...next, playerStatuses: addStacks(next.playerStatuses, 'strength', amount) };
+    const totalStacks = stacksOf(next.playerStatuses, 'strength');
+    effectDesc = `gaining +${amount} Strength (${totalStacks} stack${totalStacks === 1 ? '' : 's'})`;
+  }
+
+  return {
+    ...next,
+    log: [
+      ...next.log,
+      makeLog(
+        next.turnNumber,
+        'player',
+        'potion',
+        `Player uses Free Claim on ${suitName(suit)}${targetName ? ` at ${targetName}` : ''} (flat ${amount}, no play spent) -- ${effectDesc}.`,
+        snapshotOf(next),
+      ),
+    ],
+  };
+}
+
+/** Discards the room's own pile of `suit` outright -- no effect resolved, same claimRoomCards call a real play's claim uses, just without reading the count into anything. */
+function resolveSaltEffect(state: CombatState, suit: SuitId, roomCount: number): CombatState {
+  const next: CombatState = { ...state, table: claimRoomCards(state.table, suit) };
+  return {
+    ...next,
+    log: [
+      ...next.log,
+      makeLog(
+        next.turnNumber,
+        'player',
+        'potion',
+        `Player uses Salt on ${suitName(suit)}, discarding the room's pile of ${roomCount} (no play spent).`,
+        snapshotOf(next),
+      ),
+    ],
+  };
 }
 
 // --- Enemy turn resolution -----------------------------------------------
@@ -783,6 +1066,24 @@ export function applyCombatAction(state: CombatState, action: CombatAction, rng:
         ),
       ],
     };
+  }
+
+  if (action.type === 'USE_FREE_CLAIM_POTION') {
+    if (state.activeTurn !== 'player') return state;
+    const legal = getLegalFreeClaimUses(state).find(
+      (u) => u.suit === action.suit && u.targetInstanceId === action.targetInstanceId,
+    );
+    if (!legal) return state;
+    const resolved = resolveFreeClaimEffect(state, action.suit, action.targetInstanceId, legal.amount);
+    return { ...resolved, potions: removeOnePotion(state.potions, 'free-claim') };
+  }
+
+  if (action.type === 'USE_SALT_POTION') {
+    if (state.activeTurn !== 'player') return state;
+    const legal = getLegalSaltUses(state).find((u) => u.suit === action.suit);
+    if (!legal) return state;
+    const resolved = resolveSaltEffect(state, action.suit, legal.amount);
+    return { ...resolved, potions: removeOnePotion(state.potions, 'salt') };
   }
 
   if (action.type === 'PLAYER_PASS') {

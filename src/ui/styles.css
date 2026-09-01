@@ -480,6 +480,71 @@ button {
   cursor: default;
 }
 
+/* --- Potion controls --- */
+
+.potion-controls {
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.potion-controls-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.potion-kind-button {
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+  background: #2a2a38;
+  color: #eee;
+}
+
+.potion-kind-button--active {
+  border-color: #4a4ae0;
+  background: #33335a;
+}
+
+.potion-kind-button:disabled {
+  color: #777;
+  cursor: default;
+}
+
+.potion-suit-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.potion-suit-chip {
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  background: #2a2a38;
+  color: #eee;
+}
+
+.potion-suit-chip--selected {
+  border-color: #4a4ae0;
+  background: #33335a;
+}
+
+.potion-controls-note {
+  color: #999;
+  font-size: 0.85rem;
+}
+
+.potion-controls-confirm {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
 /* --- Log --- */
 
 .turn-log ul {
@@ -578,6 +643,34 @@ button {
   font-size: 1.05rem;
 }
 
+.reward-choice--relic {
+  min-width: 160px;
+  max-width: 220px;
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.reward-choice--relic h3 {
+  margin-top: 0;
+}
+
+.reward-choice--potion {
+  min-width: 160px;
+  max-width: 220px;
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.reward-choice--potion h3 {
+  margin-top: 0;
+}
+
 .reward-pass-button {
   margin-top: 1.5rem;
 }
@@ -585,6 +678,38 @@ button {
 .reward-deck-size {
   color: #999;
   margin-top: 1rem;
+}
+
+/* --- Shrine --- */
+
+.shrine-screen {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.shrine-choices {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.shrine-choice {
+  min-width: 200px;
+  max-width: 260px;
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.shrine-choice h3 {
+  margin-top: 0;
+}
+
+.shrine-pass-button {
+  margin-top: 1.5rem;
 }
 
 /* --- Doors --- */

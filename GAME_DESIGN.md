@@ -78,6 +78,15 @@ Every suit is fully symmetric: the player and any enemy can hold and play any of
 
 **Quake** is a suitless, hand-only special card, offered as a reward at `QUAKE_REWARD_RATIO` (8% of reward slots): playing it adds `QUAKE_BONUS_PLAYS` (**3**) straight into the pool, free (doesn't spend a play itself). Discarded like any other card when played, not deleted — it cycles back on the next reshuffle. The pool is finite even after Quake, so `PLAYER_PASS` (or spending it down to 0) still ends the turn.
 
+### Potions
+
+Consumable, run-persistent items (`RunState.potions`/`CombatState.potions`, `types/potions.ts`, `config/potions.ts`) that act directly on the table via `claimRoomCards`/`countTableSetSize`, deliberately outside the play/hand economy entirely — no hand card, no play spent, no rider, no relic hook, no Strength/Weaken. Both kinds are free actions: using one never spends a play and never ends the turn (`combatEngine.ts`'s `USE_FREE_CLAIM_POTION`/`USE_SALT_POTION`, same free shape as Quake above).
+
+- **Free Claim** — resolves a chosen suit's current table total (every owner combined) as a flat 1:1 effect: damage/heal/Guard/status stacks/Strength depending on the suit's category, exactly the threat/boon/guard/weaken-poison/strength split a real play resolves, just without the hand-count multiplier or any bonus layer. Claims the room's own matching cards the same way a play's claim does; a player's/an enemy's own contribution to that suit's table count is read into the total but not removed.
+- **Salt** — discards the room's own accumulated pile for a suit outright, no effect resolved — the same `claimRoomCards` call, just discarding instead of resolving.
+
+Acquired only from the reward screen (`POTION_REWARD_RATIO`, same slot shape as a relic — see §11), duplicates allowed (unlike relics), capped combined at `POTION_INVENTORY_CAP` held at once (the reward screen stops offering potions past the cap). Held potions persist across rooms/rest/reward passes like relics, and are only ever removed by being used.
+
 ---
 
 ## 3. Enemies
@@ -211,6 +220,8 @@ PLAYS_PER_TURN_BASE = 2
 QUAKE_REWARD_RATIO = 0.08         REWARD_OPTION_COUNT = 3
 QUAKE_BONUS_PLAYS = 3
 SPECIAL_REWARD_RATIO = 0.15
+RELIC_REWARD_RATIO = 0.1
+POTION_REWARD_RATIO = 0.1         POTION_INVENTORY_CAP = 4
 
 BASIC_RIDER_AMOUNT = 1     (src/config/specialCards.ts -- every plain card's rider)
 RIDER_AMOUNT = 3           (src/config/specialCards.ts -- every named special card's rider)
@@ -246,4 +257,6 @@ Design directions raised in response to §10's gaps, recorded here so future wor
 - **Rest rooms** — done (§6): a `RestRoomInstance` room kind, a `'rest'` run phase, and `RestScreen.tsx` offering the exclusive Rest/Remove-a-card choice, StS-style. `RoomInstance` is now a `CombatRoomInstance | RestRoomInstance` discriminated union; `initCombat` only ever takes the combat half.
 - **Reward pass** — done (§5): the reward screen has a general "Pass" exit (`skipReward` in `runEngine.ts`), independent of how many/what kind of options are on offer.
 - **Card removal** — done, but living in the rest room (§6) rather than as a reward-screen slot as originally sketched here: `restRemoveCard` lets the player permanently cut one card from `run.deck`. A reward-screen removal slot (alongside suit/Quake/special) is still a possible follow-up if rest rooms alone don't turn out to hit the suit-diversity gap often enough (§10) — the two aren't mutually exclusive.
+- **Relics** — done: suit-bound and rider-mutator relics (`types/relics.ts`, `config/relics.ts`, `combatEngine.ts`'s `applyRelics`), acquired via a reward-screen slot or a dedicated shrine room. Anti-symmetric relics (breaking the player/enemy rule symmetry, §3) remain unbuilt.
+- **Potions** — done (§2): Free Claim and Salt, consumable reward-screen items acting directly on the table outside the play/hand economy.
 - **Shops** — a room (or reward-adjacent) type where the player spends a resource to pick from a wider offering (cards, removals, maybe relics) rather than a free forced pick-1-of-3, or a free exclusive heal-or-cut. The largest remaining lift: there is currently no currency/resource concept anywhere in `RunState` at all, so this depends on that being designed first (what it's earned from, whether it persists or is per-room, etc.). Rest rooms have now proven out the "non-combat room" plumbing (`RoomInstance.kind`, a dedicated `RunState.phase`, a dedicated screen) a shop room would reuse the same shape of.

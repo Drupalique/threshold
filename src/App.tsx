@@ -4,6 +4,7 @@ import { useRun } from './state/runContextObject';
 import { StartScreen } from './ui/screens/StartScreen';
 import { CombatScreen } from './ui/screens/CombatScreen';
 import { RestScreen } from './ui/screens/RestScreen';
+import { ShrineScreen } from './ui/screens/ShrineScreen';
 import { RewardScreen } from './ui/screens/RewardScreen';
 import { DoorChoiceScreen } from './ui/screens/DoorChoiceScreen';
 import { RunEndScreen } from './ui/screens/RunEndScreen';
@@ -20,6 +21,8 @@ function Router() {
       return <CombatScreen />;
     case 'rest':
       return <RestScreen />;
+    case 'shrine':
+      return <ShrineScreen />;
     case 'reward':
       return <RewardScreen />;
     case 'door-choice':

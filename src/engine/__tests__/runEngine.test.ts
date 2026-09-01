@@ -8,9 +8,12 @@ import {
   chooseDoor,
   restHeal,
   restRemoveCard,
+  chooseRelic,
+  skipShrine,
 } from '../runEngine';
 import type { RunState } from '../../types/run';
-import type { RestRoomInstance } from '../../types/room';
+import type { RestRoomInstance, ShrineRoomInstance } from '../../types/room';
+import { potionById } from '../../config/potions';
 
 function clearCurrentRoom(run: RunState): RunState {
   return { ...run, combat: { ...run.combat!, enemies: [], status: 'room-cleared' } };
@@ -43,6 +46,40 @@ function enterRestRoom(run: RunState): RunState {
           // pair afterward, so this synthetic node needs one too. Nothing
           // in these tests advances past it, so the target paths don't need
           // to resolve to real nodes.
+          doors: [
+            { tags: { size: 'small', color: 'red' }, childPath: `${childPath}0` },
+            { tags: { size: 'large', color: 'blue' }, childPath: `${childPath}1` },
+          ],
+        },
+      },
+    },
+    currentDoors: [{ id: doorId, tags: { size: 'small', color: 'red' }, childPath }],
+  };
+  return chooseDoor(withDoor, doorId);
+}
+
+/**
+ * Forces the run into the 'shrine' phase deterministically, bypassing
+ * runTree's RNG-dependent SHRINE_ROOM_RATIO roll -- same synthetic-node
+ * trick enterRestRoom uses. Since shrine content is generated live (not
+ * precomputed in the tree, see types/room.ts's ShrineRoomInstance), this
+ * exercises chooseDoor's own generateShrineOptions call, not a canned list.
+ */
+function enterShrineRoom(run: RunState): RunState {
+  const shrineRoom: ShrineRoomInstance = { kind: 'shrine', id: 'test-shrine-room' };
+  const childPath = 'test-shrine-room';
+  const doorId = 'door-test-shrine-room';
+  const withDoor: RunState = {
+    ...run,
+    phase: 'door-choice',
+    runTree: {
+      ...run.runTree,
+      nodes: {
+        ...run.runTree.nodes,
+        [childPath]: {
+          path: childPath,
+          floor: run.depth + 2,
+          room: shrineRoom,
           doors: [
             { tags: { size: 'small', color: 'red' }, childPath: `${childPath}0` },
             { tags: { size: 'large', color: 'blue' }, childPath: `${childPath}1` },
@@ -202,5 +239,107 @@ describe('rest rooms', () => {
     const run = createNewRun(3);
     expect(restHeal(run)).toBe(run);
     expect(restRemoveCard(run, 'anything')).toBe(run);
+  });
+});
+
+describe('potions', () => {
+  it('a reward option of optionType potion, chosen, lands in run.potions and carries into the next room\'s combat.potions', () => {
+    // Seed 1 is known to roll a potion into one of its 3 reward slots
+    // (POTION_REWARD_RATIO is low, so an arbitrary seed usually won't).
+    let run = createNewRun(1);
+    run = startFirstRoom(run);
+    run = resolveCombatEnd(clearCurrentRoom(run));
+
+    const potionOption = run.rewardOptions!.find((o) => o.optionType === 'potion');
+    if (potionOption?.optionType !== 'potion') throw new Error('expected seed 1 to offer a potion reward');
+
+    run = chooseReward(run, potionOption.id);
+    expect(run.potions).toEqual([potionOption.potion]);
+    expect(run.phase).toBe('door-choice');
+
+    const combatDoor = run.currentDoors!.find(
+      (d) => run.runTree.nodes[d.childPath].room.kind === 'combat',
+    )!;
+    run = chooseDoor(run, combatDoor.id);
+    expect(run.combat!.potions).toEqual([potionOption.potion]);
+  });
+
+  it('holds potions across a rest room the same way it holds relics', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = { ...run, potions: [potionById('salt')] };
+    run = enterRestRoom(run);
+    run = restHeal(run);
+
+    expect(run.potions).toEqual([potionById('salt')]);
+  });
+});
+
+describe('shrine rooms', () => {
+  it('choosing a door into a shrine sets phase to shrine with generated (non-empty) options and no combat state', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShrineRoom(run);
+
+    expect(run.phase).toBe('shrine');
+    expect(run.combat).toBeNull();
+    expect(run.shrineOptions).not.toBeNull();
+    expect(run.shrineOptions!.length).toBeGreaterThan(0);
+  });
+
+  it('chooseRelic adds exactly the picked relic to held relics and proceeds to door-choice with no reward phase', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShrineRoom(run);
+    const depthBefore = run.depth;
+    const chosen = run.shrineOptions![0];
+
+    run = chooseRelic(run, chosen.id);
+
+    expect(run.relics).toEqual([chosen]);
+    expect(run.shrineOptions).toBeNull();
+    expect(run.phase).toBe('door-choice');
+    expect(run.rewardOptions).toBeNull();
+    expect(run.depth).toBe(depthBefore + 1);
+  });
+
+  it('chooseRelic rejects an id that was not offered, leaving the run in the shrine phase', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShrineRoom(run);
+
+    const rejected = chooseRelic(run, 'not-a-real-relic');
+    expect(rejected).toBe(run);
+    expect(rejected.phase).toBe('shrine');
+  });
+
+  it('skipShrine leaves relics untouched and proceeds to door-choice', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShrineRoom(run);
+
+    run = skipShrine(run);
+
+    expect(run.relics).toEqual([]);
+    expect(run.shrineOptions).toBeNull();
+    expect(run.phase).toBe('door-choice');
+  });
+
+  it('a shrine never offers a relic the player already holds', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShrineRoom(run);
+    const firstPick = run.shrineOptions![0];
+    run = chooseRelic(run, firstPick.id);
+
+    run = enterShrineRoom(run);
+
+    expect(run.shrineOptions!.some((r) => r.id === firstPick.id)).toBe(false);
+  });
+
+  it('chooseRelic and skipShrine are both no-ops outside the shrine phase', () => {
+    const run = createNewRun(3);
+    expect(chooseRelic(run, 'anything')).toBe(run);
+    expect(skipShrine(run)).toBe(run);
   });
 });

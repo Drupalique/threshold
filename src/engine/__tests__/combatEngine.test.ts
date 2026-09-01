@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '../rng';
 import type { Rng } from '../rng';
-import { initCombat, applyCombatAction, getLegalPlaySets, requiresEnemyTarget } from '../combatEngine';
+import {
+  initCombat,
+  applyCombatAction,
+  getLegalPlaySets,
+  getLegalFreeClaimUses,
+  getLegalSaltUses,
+  requiresEnemyTarget,
+} from '../combatEngine';
 import { chooseEnemyPlay } from '../enemyAI';
 import { enemyDefById } from '../../config/enemies';
 import type { CombatRoomInstance } from '../../types/room';
@@ -10,6 +17,8 @@ import type { CombatState, TableCard } from '../../types/combat';
 import type { Card, CreatureCard } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
 import { PLAYS_PER_TURN_BASE, QUAKE_BONUS_PLAYS } from '../../config/constants';
+import { relicById } from '../../config/relics';
+import { potionById } from '../../config/potions';
 
 function makeEnemy(overrides: Partial<EnemyInstance> = {}): EnemyInstance {
   return {
@@ -1145,5 +1154,274 @@ describe('hand discard & redraw (persistent deck) -- player', () => {
 
     const seenAgain = [...state.playerHand, ...state.drawPile, ...state.discardPile].some((c) => c.id === playedId);
     expect(seenAgain).toBe(true);
+  });
+});
+
+describe('relics', () => {
+  it('a rider-bonus relic scoped to a category adds its flat bonus-damage on top of the play\'s own basic rider', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+      relics: [relicById('bloodletters-mark')],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    // 0 on table + 1 played = 1 on the table x 1 hand card = 1, plus the
+    // card's own +1 basic rider, plus Bloodletter's Mark's +1 category rider = 3
+    expect(next.enemies[0].hp).toBe(30 - 3);
+    expect(next.log.some((l) => l.message.includes("Bloodletter's Mark"))).toBe(true);
+  });
+
+  it('a rider-bonus relic scoped to a category adds its flat bonus-guard the same way', () => {
+    const room = makeRoom({ params: { ...makeRoom().params, threatSuits: ['ward'] } });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'ward' }],
+      relics: [relicById('reinforced-plating')],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'ward', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    // 0 on table + 1 played = 1 x 1 = 1, plus the card's own +1 basic rider
+    // guard, plus Reinforced Plating's +1 category rider guard = 3
+    expect(next.playerGuard).toBe(3);
+  });
+
+  it('a status-on-claim relic inflicts its status on the enemy target for an enemy-facing suit', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+      relics: [relicById('alphas-snare')],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    expect(next.enemies[0].statuses.weaken).toBe(1);
+  });
+
+  it('a status-on-claim relic scoped to a self-targeting suit buffs the actor instead of an enemy', () => {
+    const room = makeRoom({ params: { ...makeRoom().params, threatSuits: ['grace'] } });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'grace' }],
+      relics: [relicById('blessing-of-vigor')],
+    });
+
+    const next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'grace', handCardIds: ['ph1'] }, rng);
+
+    expect(next.playerStatuses.strength).toBe(1);
+  });
+
+  it('a relic scoped to a different suit/category does nothing', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+      // Guard-scoped/Grace-scoped relics, neither of which matches a Wolf play.
+      relics: [relicById('reinforced-plating'), relicById('venomous-bite')],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    // 0 on table + 1 played = 1 x 1 = 1, plus the card's own +1 basic rider = 2 -- no relic bonus.
+    expect(next.enemies[0].hp).toBe(30 - 2);
+    expect(next.enemies[0].statuses.poison).toBeUndefined();
+    expect(next.playerGuard).toBe(0);
+  });
+});
+
+describe('potions', () => {
+  it('Free Claim resolves a threat suit\'s flat table total as damage, with no play spent and the turn continuing', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [
+        { id: 't1', suit: 'wolf', ownerId: 'room' },
+        { id: 't2', suit: 'wolf', ownerId: 'room' },
+        { id: 't3', suit: 'wolf', ownerId: 'room' },
+      ],
+      potions: [potionById('free-claim')],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e1' },
+      rng,
+    );
+
+    // Flat 1:1 -- no hand-card multiplier, no rider, no Strength/Weaken.
+    expect(next.enemies[0].hp).toBe(30 - 3);
+    expect(next.playsRemaining).toBe(state.playsRemaining);
+    expect(next.activeTurn).toBe('player');
+    expect(next.potions).toEqual([]);
+    expect(next.log.some((l) => l.type === 'potion' && l.message.includes('Free Claim'))).toBe(true);
+  });
+
+  it('Free Claim fans out over every alive enemy for a threat suit, same as a real play', () => {
+    const room = makeRoom({
+      enemies: [makeEnemy({ instanceId: 'e1', hp: 30, hpMax: 30 }), makeEnemy({ instanceId: 'e2', hp: 30, hpMax: 30 })],
+    });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 't1', suit: 'wolf', ownerId: 'room' }],
+      potions: [potionById('free-claim')],
+    });
+
+    const uses = getLegalFreeClaimUses(state).filter((u) => u.suit === 'wolf');
+    expect(uses.length).toBe(2);
+    expect(uses.every((u) => u.amount === 1)).toBe(true);
+
+    const next = applyCombatAction(state, { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e2' }, rng);
+    expect(next.enemies.find((e) => e.instanceId === 'e1')!.hp).toBe(30); // untouched
+    expect(next.enemies.find((e) => e.instanceId === 'e2')!.hp).toBe(29);
+  });
+
+  it('Free Claim only claims the room\'s own matching cards -- the player\'s/an enemy\'s own contribution to that suit\'s table count stays on the table', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1', hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [
+        { id: 't1', suit: 'wolf', ownerId: 'room' },
+        { id: 't2', suit: 'wolf', ownerId: 'room' },
+        { id: 't3', suit: 'wolf', ownerId: 'e1' },
+      ],
+      potions: [potionById('free-claim')],
+    });
+
+    const next = applyCombatAction(state, { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e1' }, rng);
+
+    // amount = all 3 owners combined, but only the 2 room-owned cards are
+    // actually removed from the table -- e1's own contribution is untouched
+    // (only e1's own next-turn wipe ever clears it).
+    expect(next.enemies[0].hp).toBe(30 - 3);
+    expect(next.table.filter((c) => c.suit === 'wolf' && c.ownerId === 'room').length).toBe(0);
+    expect(next.table.some((c) => c.id === 't3' && c.ownerId === 'e1')).toBe(true);
+  });
+
+  it('Free Claim on a guard suit banks flat Guard, on a weaken suit inflicts flat stacks, and on a strength suit self-buffs -- all with no play spent', () => {
+    const room = makeRoom();
+    const rng = createRng(1);
+
+    const guardState = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 'w1', suit: 'ward', ownerId: 'room' }, { id: 'w2', suit: 'ward', ownerId: 'room' }],
+      potions: [potionById('free-claim')],
+    });
+    const guardNext = applyCombatAction(guardState, { type: 'USE_FREE_CLAIM_POTION', suit: 'ward' }, rng);
+    expect(guardNext.playerGuard).toBe(2);
+
+    const weakenState = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 'h1', suit: 'hex', ownerId: 'room' }],
+      potions: [potionById('free-claim')],
+    });
+    const weakenNext = applyCombatAction(weakenState, { type: 'USE_FREE_CLAIM_POTION', suit: 'hex', targetInstanceId: 'e1' }, rng);
+    expect(weakenNext.enemies[0].statuses.weaken).toBe(1);
+    expect(weakenNext.enemies[0].hp).toBe(20); // no rider -- untouched HP
+
+    const strengthState = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 'v1', suit: 'vigor', ownerId: 'room' }, { id: 'v2', suit: 'vigor', ownerId: 'room' }],
+      potions: [potionById('free-claim')],
+    });
+    const strengthNext = applyCombatAction(strengthState, { type: 'USE_FREE_CLAIM_POTION', suit: 'vigor' }, rng);
+    expect(strengthNext.playerStatuses.strength).toBe(2);
+  });
+
+  it('is illegal without a held Free Claim potion, or when the suit has nothing on the table -- state unchanged either way', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+
+    const noPotion = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 't1', suit: 'wolf', ownerId: 'room' }],
+      potions: [],
+    });
+    expect(getLegalFreeClaimUses(noPotion)).toEqual([]);
+    expect(applyCombatAction(noPotion, { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e1' }, rng)).toBe(noPotion);
+
+    const emptyTable = makeCombat(room, rng, 30, 30, {
+      table: [],
+      potions: [potionById('free-claim')],
+    });
+    expect(getLegalFreeClaimUses(emptyTable).filter((u) => u.suit === 'wolf')).toEqual([]);
+    expect(applyCombatAction(emptyTable, { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e1' }, rng)).toBe(emptyTable);
+  });
+
+  it('Salt discards only the room\'s own pile for a suit -- no effect resolved, player/enemy-owned cards of that suit untouched', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1', hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [
+        { id: 't1', suit: 'wolf', ownerId: 'room' },
+        { id: 't2', suit: 'wolf', ownerId: 'room' },
+        { id: 't3', suit: 'wolf', ownerId: 'e1' },
+      ],
+      potions: [potionById('salt')],
+    });
+
+    const uses = getLegalSaltUses(state);
+    expect(uses).toEqual([{ suit: 'wolf', amount: 2 }]);
+
+    const next = applyCombatAction(state, { type: 'USE_SALT_POTION', suit: 'wolf' }, rng);
+
+    expect(next.table.filter((c) => c.suit === 'wolf' && c.ownerId === 'room').length).toBe(0);
+    expect(next.table.some((c) => c.id === 't3' && c.ownerId === 'e1')).toBe(true);
+    expect(next.enemies[0].hp).toBe(30); // nothing resolved -- purely discarded
+    expect(next.playerHP).toBe(30);
+    expect(next.playsRemaining).toBe(state.playsRemaining);
+    expect(next.activeTurn).toBe('player');
+    expect(next.potions).toEqual([]);
+    expect(next.log.some((l) => l.type === 'potion' && l.message.includes('Salt'))).toBe(true);
+  });
+
+  it('is illegal without a held Salt potion, or when the room holds nothing of that suit -- state unchanged either way', () => {
+    const room = makeRoom();
+    const rng = createRng(1);
+
+    const noPotion = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 't1', suit: 'wolf', ownerId: 'room' }],
+      potions: [],
+    });
+    expect(applyCombatAction(noPotion, { type: 'USE_SALT_POTION', suit: 'wolf' }, rng)).toBe(noPotion);
+
+    const noRoomPile = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 't1', suit: 'wolf', ownerId: 'player' }],
+      potions: [potionById('salt')],
+    });
+    expect(getLegalSaltUses(noRoomPile)).toEqual([]);
+    expect(applyCombatAction(noRoomPile, { type: 'USE_SALT_POTION', suit: 'wolf' }, rng)).toBe(noRoomPile);
+  });
+
+  it('consuming one potion of a kind leaves other held potions (including other-kind and duplicate) untouched', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [{ id: 't1', suit: 'wolf', ownerId: 'room' }],
+      potions: [potionById('free-claim'), potionById('free-claim'), potionById('salt')],
+    });
+
+    const next = applyCombatAction(state, { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e1' }, rng);
+    expect(next.potions).toEqual([potionById('free-claim'), potionById('salt')]);
   });
 });

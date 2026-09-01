@@ -3,9 +3,15 @@ import type { PoolSizeBand, RoomInstance } from '../types/room';
 import type { RunTree, RunTreeNode, TreeDoorRef } from '../types/runTree';
 import type { Rng } from './rng';
 import { createNodeRng } from './rng';
-import { generateRoom, generateRestRoom } from './roomGenerator';
-import { uniformPick } from './weightedPick';
-import { SUIT_COLOR_FAMILY, DOOR_CORRELATION_RATE, REST_ROOM_RATIO, RUN_MAX_DEPTH } from '../config/constants';
+import { generateRoom, generateRestRoom, generateShrineRoom } from './roomGenerator';
+import { uniformPick, weightedPick } from './weightedPick';
+import {
+  SUIT_COLOR_FAMILY,
+  DOOR_CORRELATION_RATE,
+  REST_ROOM_RATIO,
+  SHRINE_ROOM_RATIO,
+  RUN_MAX_DEPTH,
+} from '../config/constants';
 
 function flipSize(size: PoolSizeBand): PoolSizeBand {
   return size === 'small' ? 'large' : 'small';
@@ -23,7 +29,7 @@ function flipColor(color: DoorColor): DoorColor {
  * screen is a possible follow-up, not implemented here.
  */
 function trueTagsForRoom(room: RoomInstance, rng: Rng): DoorTags {
-  if (room.kind === 'rest') {
+  if (room.kind === 'rest' || room.kind === 'shrine') {
     return { size: uniformPick(rng, ['small', 'large']), color: uniformPick(rng, ['red', 'blue']) };
   }
   return {
@@ -58,12 +64,23 @@ export function buildRunTree(seed: number, maxDepth: number = RUN_MAX_DEPTH): Ru
       const nodeRng = createNodeRng(seed, childPath);
 
       // The elite floor (childFloor >= RUN_MAX_DEPTH) is always the
-      // guaranteed solo boss fight -- never a rest room, so the roll is
-      // skipped entirely once childFloor reaches the run's last room.
+      // guaranteed solo boss fight -- never a rest/shrine room, so the roll
+      // is skipped entirely once childFloor reaches the run's last room.
+      type RoomKind = 'rest' | 'shrine' | 'combat';
+      const roomKind: RoomKind =
+        childFloor < maxDepth
+          ? weightedPick<RoomKind>(nodeRng, [
+              { weight: REST_ROOM_RATIO, value: 'rest' },
+              { weight: SHRINE_ROOM_RATIO, value: 'shrine' },
+              { weight: 1 - REST_ROOM_RATIO - SHRINE_ROOM_RATIO, value: 'combat' },
+            ])
+          : 'combat';
       const room: RoomInstance =
-        childFloor < maxDepth && nodeRng.next() < REST_ROOM_RATIO
+        roomKind === 'rest'
           ? generateRestRoom(childPath)
-          : generateRoom(nodeRng, childFloor, childPath);
+          : roomKind === 'shrine'
+            ? generateShrineRoom(childPath)
+            : generateRoom(nodeRng, childFloor, childPath);
 
       const trueTags = trueTagsForRoom(room, nodeRng);
       const tags: DoorTags = {

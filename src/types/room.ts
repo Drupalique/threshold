@@ -58,4 +58,19 @@ export interface RestRoomInstance {
   id: string;
 }
 
-export type RoomInstance = CombatRoomInstance | RestRoomInstance;
+/**
+ * A relic-offering stop, resolved by runEngine's chooseRelic/skipShrine
+ * rather than combatEngine.ts -- see doorGenerator.ts/runTree.ts's
+ * SHRINE_ROOM_RATIO roll. Unlike CombatRoomInstance/RestRoomInstance, its
+ * offer isn't precomputed here: which relics it offers must exclude
+ * whatever the player already holds by the time they arrive, and the run
+ * tree is built once at run start before any relics exist. So its content
+ * is generated live off run.rng in chooseDoor, the same way reward options
+ * already are, instead of being fixed by the tree's own seed.
+ */
+export interface ShrineRoomInstance {
+  kind: 'shrine';
+  id: string;
+}
+
+export type RoomInstance = CombatRoomInstance | RestRoomInstance | ShrineRoomInstance;

@@ -8,9 +8,9 @@
 // Usage: npx tsx scripts/playtest.ts <command> [args...]
 // Run `npx tsx scripts/playtest.ts help` for the command list.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, restHeal, restRemoveCard, chooseDoor } from '../src/engine/runEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, restHeal, restRemoveCard, chooseRelic, skipShrine, chooseDoor } from '../src/engine/runEngine.ts';
 import { createRngFromState } from '../src/engine/rng.ts';
-import { getLegalPlaySets, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
+import { getLegalPlaySets, getLegalFreeClaimUses, getLegalSaltUses, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS, REST_HEAL_PCT, QUAKE_BONUS_PLAYS } from '../src/config/constants.ts';
 import type { RunState } from '../src/types/run.ts';
 import type { TableCard } from '../src/types/combat.ts';
@@ -98,6 +98,8 @@ function render(run: RunState, lastLogLength: number) {
   const lines: string[] = [];
   lines.push(`=== seed=${run.seed} depth=${run.depth}/${run.maxDepth} phase=${run.phase} ===`);
   lines.push(`Player HP: ${run.playerHP}/${run.playerHPMax}`);
+  if (run.relics.length > 0) lines.push(`Relics: ${run.relics.map((r) => r.name).join(', ')}`);
+  if (run.potions.length > 0) lines.push(`Potions: ${run.potions.map((p) => p.name).join(', ')}`);
 
   if (run.phase === 'combat' && run.combat) {
     const c = run.combat;
@@ -134,6 +136,22 @@ function render(run: RunState, lastLogLength: number) {
         const targetName = t.targetInstanceId ? c.enemies.find((e) => e.instanceId === t.targetInstanceId)?.name : '';
         lines.push(`  ${t.suit} x${t.tableSetSize}${t.targetInstanceId ? ` -> ${targetName} [${t.targetInstanceId}]` : ''} : hand ${matchingIds.join(',')}`);
       }
+
+      const freeClaimUses = getLegalFreeClaimUses(c);
+      if (freeClaimUses.length > 0) {
+        lines.push('');
+        lines.push('Legal Free Claim potion uses (suit / flat amount / target if any):');
+        for (const u of freeClaimUses) {
+          const targetName = u.targetInstanceId ? c.enemies.find((e) => e.instanceId === u.targetInstanceId)?.name : '';
+          lines.push(`  ${u.suit} flat ${u.amount}${u.targetInstanceId ? ` -> ${targetName} [${u.targetInstanceId}]` : ''}`);
+        }
+      }
+      const saltUses = getLegalSaltUses(c);
+      if (saltUses.length > 0) {
+        lines.push('');
+        lines.push('Legal Salt potion uses (suit / room-owned pile size):');
+        for (const u of saltUses) lines.push(`  ${u.suit} x${u.amount}`);
+      }
     }
 
     lines.push('');
@@ -159,10 +177,25 @@ function render(run: RunState, lastLogLength: number) {
 
   if (run.phase === 'reward' && run.rewardOptions) {
     lines.push('');
-    lines.push(`Choose a reward card (deck size ${run.deck.length}):`);
-    run.rewardOptions.forEach((card, i) => {
-      const desc = card.kind === 'quake' ? `QUAKE -- +${QUAKE_BONUS_PLAYS} plays for a turn` : `${card.suit} (${suitCategory(card.suit)})`;
-      lines.push(`  [${i}] [${card.id}] ${desc}`);
+    lines.push(`Choose a reward (deck size ${run.deck.length}):`);
+    run.rewardOptions.forEach((opt, i) => {
+      const desc =
+        opt.optionType === 'relic'
+          ? `RELIC -- ${opt.relic.name}: ${opt.relic.description}`
+          : opt.optionType === 'potion'
+            ? `POTION -- ${opt.potion.name}: ${opt.potion.description}`
+            : opt.card.kind === 'quake'
+              ? `QUAKE -- +${QUAKE_BONUS_PLAYS} plays for a turn`
+              : `${opt.card.suit} (${suitCategory(opt.card.suit)})`;
+      lines.push(`  [${i}] [${opt.id}] ${desc}`);
+    });
+  }
+
+  if (run.phase === 'shrine' && run.shrineOptions) {
+    lines.push('');
+    lines.push('A shrine offers a relic (exclusive -- pick one, or shrine-pass):');
+    run.shrineOptions.forEach((relic, i) => {
+      lines.push(`  [${i}] [${relic.id}] ${relic.name}: ${relic.description}`);
     });
   }
 
@@ -249,6 +282,36 @@ switch (cmd) {
     break;
   }
 
+  case 'potion-free-claim': {
+    const [suit, target] = args;
+    if (!suit) {
+      console.log('Usage: potion-free-claim <suit> [targetInstanceId]');
+      process.exit(1);
+    }
+    const { run } = load();
+    if (requiresEnemyTarget(suitCategory(suit as SuitId)) && !target) {
+      console.log(`Suit "${suit}" requires a target enemy instance id -- see the legal Free Claim uses list.`);
+      process.exit(1);
+    }
+    const next = applyCombatAction(run, { type: 'USE_FREE_CLAIM_POTION', suit: suit as SuitId, targetInstanceId: target });
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
+  case 'potion-salt': {
+    const [suit] = args;
+    if (!suit) {
+      console.log('Usage: potion-salt <suit>');
+      process.exit(1);
+    }
+    const { run } = load();
+    const next = applyCombatAction(run, { type: 'USE_SALT_POTION', suit: suit as SuitId });
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
   case 'reward': {
     const [indexRaw] = args;
     if (!indexRaw) {
@@ -317,6 +380,41 @@ switch (cmd) {
     break;
   }
 
+  case 'shrine': {
+    const [indexRaw] = args;
+    if (!indexRaw) {
+      console.log('Usage: shrine <relicIndex>');
+      process.exit(1);
+    }
+    const { run } = load();
+    if (run.phase !== 'shrine' || !run.shrineOptions) {
+      console.log('Not currently at a shrine.');
+      process.exit(1);
+    }
+    const index = Number(indexRaw);
+    const chosen = run.shrineOptions[index];
+    if (!chosen) {
+      console.log(`No relic option at index ${indexRaw}.`);
+      process.exit(1);
+    }
+    const next = chooseRelic(run, chosen.id);
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
+  case 'shrine-pass': {
+    const { run } = load();
+    if (run.phase !== 'shrine') {
+      console.log('Not currently at a shrine.');
+      process.exit(1);
+    }
+    const next = skipShrine(run);
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
   case 'door': {
     const [doorId] = args;
     if (!doorId) {
@@ -340,10 +438,14 @@ Commands:
   play <suit> <id,id,...> [targetId]      play matching hand cards onto the table (multiplies against what's already there)
   pass                                    end your turn without playing
   quake <cardId>                          play a Quake card (+${QUAKE_BONUS_PLAYS} plays this turn)
-  reward <cardIndex>                      pick a reward card (0-2) after clearing a room, before the door choice
+  potion-free-claim <suit> [targetId]     use a held Free Claim potion (flat effect, free of a play or hand card)
+  potion-salt <suit>                      use a held Salt potion (discards the room's own pile for a suit, free)
+  reward <optionIndex>                    pick a reward option (0-2, card, relic, or potion) after clearing a room, before the door choice
   reward-pass                             decline every offered reward and proceed to the door choice
   rest-heal                               at a rest room, restore HP instead of removing a card
   rest-remove <cardId>                    at a rest room, permanently remove a card instead of resting
+  shrine <relicIndex>                     at a shrine, take one of the offered relics
+  shrine-pass                             at a shrine, leave without taking a relic
   door <doorId>                           pick a door after clearing a room
   help                                    this message
 

@@ -3,6 +3,8 @@ import type { Card } from './cards';
 import type { EnemyInstance } from './enemy';
 import type { RoomParams } from './room';
 import type { StatusBag } from './status';
+import type { RelicDef } from './relics';
+import type { PotionDef } from './potions';
 
 export type CombatActor = 'player' | 'enemy';
 export type CombatStatus = 'active' | 'room-cleared' | 'player-dead';
@@ -69,6 +71,16 @@ export interface CombatState {
   playsRemaining: number;
   log: LogEntry[];
   status: CombatStatus;
+  // Copied in once from RunState.relics at initCombat -- see
+  // combatEngine.ts's applyRelics, which reads this directly rather than
+  // taking relics as a separate performPlay parameter.
+  relics: RelicDef[];
+  // Copied in once from RunState.potions at initCombat, then mutated as the
+  // player consumes potions mid-combat (see applyCombatAction's
+  // USE_FREE_CLAIM_POTION/USE_SALT_POTION branches) -- runEngine.ts's own
+  // applyCombatAction wrapper syncs the result back into RunState.potions
+  // the same way it already does for playerHP.
+  potions: PotionDef[];
 }
 
 /**
@@ -103,8 +115,27 @@ export interface EnemyTurnAction {
   type: 'ENEMY_TURN';
 }
 
+// Both potion actions are free, like PlayerPlayQuakeAction -- no play spent,
+// turn doesn't end -- and act directly on the table via claimRoomCards
+// rather than through a hand card (see combatEngine.ts's
+// resolveFreeClaimEffect/resolveSaltEffect). targetInstanceId follows the
+// same rule PlaySetAction's does: required when the suit's category is
+// threat/weaken/poison, omitted otherwise.
+export interface UseFreeClaimPotionAction {
+  type: 'USE_FREE_CLAIM_POTION';
+  suit: SuitId;
+  targetInstanceId?: string;
+}
+
+export interface UseSaltPotionAction {
+  type: 'USE_SALT_POTION';
+  suit: SuitId;
+}
+
 export type CombatAction =
   | PlaySetAction
   | PlayerPassAction
   | PlayerPlayQuakeAction
-  | EnemyTurnAction;
+  | EnemyTurnAction
+  | UseFreeClaimPotionAction
+  | UseSaltPotionAction;

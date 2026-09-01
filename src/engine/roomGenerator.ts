@@ -1,4 +1,4 @@
-import type { CombatRoomInstance, RestRoomInstance, RoomParams, PoolSizeBand } from '../types/room';
+import type { CombatRoomInstance, RestRoomInstance, ShrineRoomInstance, RoomParams, PoolSizeBand } from '../types/room';
 import type { EnemyInstance } from '../types/enemy';
 import type { SuitId } from '../types/suits';
 import type { Rng } from './rng';
@@ -144,4 +144,9 @@ export function generateRoom(rng: Rng, floor: number, id: string): CombatRoomIns
 /** A campfire/fairy's-cave rest stop -- no table, no enemies, nothing to roll besides an id. See runTree.ts's REST_ROOM_RATIO roll. */
 export function generateRestRoom(id: string): RestRoomInstance {
   return { kind: 'rest', id };
+}
+
+/** A relic-offering shrine -- no table, no enemies, and (unlike combat/rest rooms) no precomputed content: see types/room.ts's ShrineRoomInstance for why its relic offer is generated live instead. See runTree.ts's SHRINE_ROOM_RATIO roll. */
+export function generateShrineRoom(id: string): ShrineRoomInstance {
+  return { kind: 'shrine', id };
 }

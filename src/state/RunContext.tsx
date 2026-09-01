@@ -10,6 +10,8 @@ import {
   skipReward,
   restHeal,
   restRemoveCard,
+  chooseRelic,
+  skipShrine,
   chooseDoor,
 } from '../engine/runEngine';
 import { RunContext, type RunContextValue } from './runContextObject';
@@ -22,6 +24,8 @@ type RunReducerAction =
   | { type: 'SKIP_REWARD' }
   | { type: 'REST_HEAL' }
   | { type: 'REST_REMOVE_CARD'; cardId: string }
+  | { type: 'CHOOSE_RELIC'; relicId: string }
+  | { type: 'SKIP_SHRINE' }
   | { type: 'CHOOSE_DOOR'; doorId: string }
   | { type: 'RESTART' };
 
@@ -45,6 +49,10 @@ function reducer(state: RunState, action: RunReducerAction): RunState {
       return restHeal(state);
     case 'REST_REMOVE_CARD':
       return restRemoveCard(state, action.cardId);
+    case 'CHOOSE_RELIC':
+      return chooseRelic(state, action.relicId);
+    case 'SKIP_SHRINE':
+      return skipShrine(state);
     case 'CHOOSE_DOOR':
       return chooseDoor(state, action.doorId);
     case 'RESTART':
@@ -66,6 +74,8 @@ export function RunProvider({ children }: { children: ReactNode }) {
     skipReward: () => dispatch({ type: 'SKIP_REWARD' }),
     restHeal: () => dispatch({ type: 'REST_HEAL' }),
     restRemoveCard: (cardId) => dispatch({ type: 'REST_REMOVE_CARD', cardId }),
+    chooseRelic: (relicId) => dispatch({ type: 'CHOOSE_RELIC', relicId }),
+    skipShrine: () => dispatch({ type: 'SKIP_SHRINE' }),
     chooseDoor: (doorId) => dispatch({ type: 'CHOOSE_DOOR', doorId }),
     restart: () => dispatch({ type: 'RESTART' }),
   };
