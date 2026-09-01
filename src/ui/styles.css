@@ -268,6 +268,13 @@ button {
   padding: 0.3rem 0.5rem;
 }
 
+/* The suit icon (ui/suitIcons.ts) -- shown on every card of a suit, plain or
+   named special, so the two read as obviously the same suit at a glance. */
+.card-chip-icon {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
 .card-chip-label {
   line-height: 1.1;
   text-align: center;

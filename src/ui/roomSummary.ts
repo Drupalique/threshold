@@ -1,7 +1,9 @@
 import type { RoomInstance } from '../types/room';
+import type { SuitId } from '../types/suits';
 import { SUIT_DEFINITIONS } from '../config/constants';
+import { suitIcon } from './suitIcons';
 
-const suitName = (id: string) => SUIT_DEFINITIONS.find((s) => s.id === id)?.name ?? id;
+const suitName = (id: SuitId) => `${suitIcon(id)} ${SUIT_DEFINITIONS.find((s) => s.id === id)?.name ?? id}`;
 
 export interface RoomSummary {
   /** Very short label -- fits a compact tree-node chip. */

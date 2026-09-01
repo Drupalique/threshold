@@ -5,6 +5,7 @@ import type { SuitId } from '../../types/suits';
 import type { PotionKind } from '../../types/potions';
 import { getLegalPlaySets, getLegalFreeClaimUses, getLegalSaltUses, requiresEnemyTarget, previewPlayerPlay } from '../../engine/combatEngine';
 import { SUIT_DEFINITIONS, TURN_ANIMATION_DELAY_MS } from '../../config/constants';
+import { suitIcon } from '../suitIcons';
 import { useLogPlayback } from '../hooks/useLogPlayback';
 import { MeterBar } from '../components/MeterBar';
 import { TableDisplay } from '../components/TableDisplay';
@@ -246,7 +247,7 @@ export function CombatScreen() {
           {combat.status === 'active' && (
             <PlayControls
               isPlayerTurn={canAct}
-              selectedSuitName={selectedSuit ? SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.name : null}
+              selectedSuitName={selectedSuit ? `${suitIcon(selectedSuit)} ${SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.name}` : null}
               selectedCount={selectedIds.size}
               preview={playPreview}
               canPlay={canPlay}

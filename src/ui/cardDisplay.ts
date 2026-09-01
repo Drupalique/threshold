@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react';
 import type { CreatureCard } from '../types/cards';
 import { SUIT_DEFINITIONS } from '../config/constants';
 import { specialCardById, riderForCard, riderDescription } from '../config/specialCards';
+import { suitIcon } from './suitIcons';
 
 // Shared by CardChip's clickable <button> and EnemyPanel's non-interactive
 // <span> so a card reads identically everywhere it's shown -- suit color,
@@ -15,8 +16,11 @@ export function cardChipStyle(card: CreatureCard): CSSProperties {
 
 export function cardChipTitle(card: CreatureCard): string {
   const suitDef = SUIT_DEFINITIONS.find((s) => s.id === card.suit)!;
+  const icon = suitIcon(card.suit);
   const specialDef = card.specialId ? specialCardById(card.specialId) : undefined;
-  if (specialDef) return `${specialDef.name} (${suitDef.name}) -- ${specialDef.description}`;
+  // Always names the suit even for a special, so hovering makes the
+  // suit relationship explicit, not just implied by the shared icon.
+  if (specialDef) return `${icon} ${specialDef.name} (${suitDef.name} suit) -- ${specialDef.description}`;
   const rider = riderForCard(card, suitDef.category);
-  return `${suitDef.name} -- ${riderDescription(rider)}`;
+  return `${icon} ${suitDef.name} -- ${riderDescription(rider)}`;
 }

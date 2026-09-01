@@ -3,6 +3,7 @@ import type { EnemyInstance } from '../../types/enemy';
 import type { SuitId } from '../../types/suits';
 import { SUIT_DEFINITIONS } from '../../config/constants';
 import { CardChip } from './CardChip';
+import { suitIcon } from '../suitIcons';
 
 interface TableDisplayProps {
   table: TableCard[];
@@ -74,7 +75,7 @@ function OwnerLane({
                 .join(' ')}
             >
               <div className="table-group-label">
-                {label} x{suitCards.length}
+                {suitIcon(suitId)} {label} x{suitCards.length}
                 {total !== suitCards.length && <span className="table-group-total"> (table total x{total})</span>}
               </div>
               <div className="table-group-cards">

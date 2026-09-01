@@ -2,6 +2,7 @@ import type { PotionDef, PotionKind } from '../../types/potions';
 import type { SuitId } from '../../types/suits';
 import type { LegalPotionUse } from '../../engine/combatEngine';
 import { SUIT_DEFINITIONS } from '../../config/constants';
+import { suitIcon } from '../suitIcons';
 
 export interface PendingPotion {
   kind: PotionKind;
@@ -27,7 +28,7 @@ interface PotionControlsProps {
 }
 
 function suitLabel(suit: SuitId): string {
-  return SUIT_DEFINITIONS.find((s) => s.id === suit)!.name;
+  return `${suitIcon(suit)} ${SUIT_DEFINITIONS.find((s) => s.id === suit)!.name}`;
 }
 
 // Suit chips for whichever kind is pending -- deduped, since getLegalFreeClaimUses
