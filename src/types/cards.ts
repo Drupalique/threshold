@@ -17,10 +17,11 @@ export interface CreatureCard {
 }
 
 // The Earthquake round's namesake special card (design request: "a special
-// card that grants unlimited plays that turn"). Suitless and never enters
-// the pool -- it's a one-off hand card the player plays directly (see
-// combatEngine's PLAYER_PLAY_QUAKE), not something claimed against a pool
-// set, so it carries no suit and matches no set.
+// card that grants unlimited plays that turn" -- now a flat QUAKE_BONUS_PLAYS
+// grant into the numeric plays pool rather than true-unlimited plays, see
+// combatEngine's PLAYER_PLAY_QUAKE). Suitless and never enters the pool --
+// it's a one-off hand card the player plays directly, not something claimed
+// against a pool set, so it carries no suit and matches no set.
 export interface QuakeCard {
   id: string;
   kind: 'quake';

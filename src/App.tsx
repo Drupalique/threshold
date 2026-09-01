@@ -60,9 +60,7 @@ function CombatTopBarStatus() {
         `Turn ${combat.turnNumber} -- ${isPlaying ? 'Resolving...' : isPlayerTurn ? 'Your turn' : "Enemies' turn"}`}
       {combat.status === 'active' && isPlayerTurn && !isPlaying && (
         <span className="combat-plays-remaining">
-          {combat.unlimitedPlaysThisTurn
-            ? ' -- Unlimited plays!'
-            : ` -- ${combat.playsRemaining} play${combat.playsRemaining === 1 ? '' : 's'} left`}
+          {` -- ${combat.playsRemaining} play${combat.playsRemaining === 1 ? '' : 's'} left`}
         </span>
       )}
     </div>

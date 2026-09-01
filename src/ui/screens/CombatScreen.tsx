@@ -139,7 +139,7 @@ export function CombatScreen() {
     ? previewPlayerPlay(combat, selectedSuit, Array.from(selectedIds))
     : null;
   const hasChosenTarget = suitNeedsNoTarget || selectedTargetInstanceId !== null;
-  const hasPlaysLeft = combat.unlimitedPlaysThisTurn || combat.playsRemaining > 0;
+  const hasPlaysLeft = combat.playsRemaining > 0;
   const canPlay =
     canAct &&
     hasPlaysLeft &&

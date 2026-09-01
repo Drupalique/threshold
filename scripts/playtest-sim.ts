@@ -336,7 +336,7 @@ async function playPlayerTurn(run: RunState): Promise<RunState> {
       m.playMagnitudes.strength.push((after.playerStatuses.strength ?? 0) - before.playerStrength);
     }
 
-    if (!after.unlimitedPlaysThisTurn && after.playsRemaining <= 0) {
+    if (after.playsRemaining <= 0) {
       m.totalPlayerTurns++;
       m.unclaimedCardsPerTurn.push(after.activeTurn === 'player' ? 0 : after.playerHand.length);
       break;

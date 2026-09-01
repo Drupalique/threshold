@@ -9,7 +9,7 @@ import type { EnemyInstance } from '../../types/enemy';
 import type { CombatState, TableCard } from '../../types/combat';
 import type { Card, CreatureCard } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { PLAYS_PER_TURN_BASE } from '../../config/constants';
+import { PLAYS_PER_TURN_BASE, QUAKE_BONUS_PLAYS } from '../../config/constants';
 
 function makeEnemy(overrides: Partial<EnemyInstance> = {}): EnemyInstance {
   return {
@@ -202,7 +202,7 @@ describe('legality and plays per turn', () => {
     expect(next.table.filter((c) => c.suit === 'rot' && c.ownerId === 'player').length).toBe(2); // played cards still land on the table
   });
 
-  it('a Quake card grants unlimited plays for the rest of the turn until the player passes', () => {
+  it('a Quake card adds a flat bonus straight into the plays pool, on top of whatever is left this turn', () => {
     const room = makeRoom();
     const rng = createRng(33);
     let state: CombatState = makeCombat(room, rng, 30, 30, {
@@ -216,19 +216,20 @@ describe('legality and plays per turn', () => {
     });
 
     state = applyCombatAction(state, { type: 'PLAYER_PLAY_QUAKE', cardId: 'phq' }, rng);
-    expect(state.unlimitedPlaysThisTurn).toBe(true);
     expect(state.activeTurn).toBe('player'); // playing it doesn't end the turn
     expect(state.playerHand.some((c) => c.id === 'phq')).toBe(false); // consumed
     expect(state.discardPile.some((c) => c.id === 'phq')).toBe(true); // discarded, not vanished
-    expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE); // untouched -- it isn't spent, it's bypassed
+    expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE + QUAKE_BONUS_PLAYS); // topped up, not bypassed
 
-    // Three plays in a row -- more than PLAYS_PER_TURN_BASE would normally allow.
+    // Three plays in a row -- more than PLAYS_PER_TURN_BASE alone would allow,
+    // but well within the Quake-topped pool.
     state = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
       rng,
     );
     expect(state.activeTurn).toBe('player');
+    expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE + QUAKE_BONUS_PLAYS - 1);
     state = applyCombatAction(
       state,
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph2'] },
@@ -240,12 +241,12 @@ describe('legality and plays per turn', () => {
       { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph3'] },
       rng,
     );
-    expect(state.activeTurn).toBe('player'); // still going -- unlimited
+    expect(state.activeTurn).toBe('player'); // still going -- pool isn't exhausted yet
+    expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE + QUAKE_BONUS_PLAYS - 3);
 
-    // Only Pass actually ends a Quake-boosted turn.
+    // The pool is finite now, so Pass is still needed to end the turn early.
     state = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
     expect(state.activeTurn).toBe('enemy');
-    expect(state.unlimitedPlaysThisTurn).toBe(false); // cleared once the turn actually ends
   });
 });
 
@@ -361,7 +362,6 @@ describe('claiming the room caps Quake self-compounding by splitting a suit into
         { id: 'ph3', kind: 'creature', suit: 'wolf' },
       ],
       playsRemaining: 1,
-      unlimitedPlaysThisTurn: true,
     });
     bigPlayState = applyCombatAction(
       bigPlayState,
@@ -386,8 +386,7 @@ describe('claiming the room caps Quake self-compounding by splitting a suit into
         { id: 'ph2', kind: 'creature', suit: 'wolf' },
         { id: 'ph3', kind: 'creature', suit: 'wolf' },
       ],
-      playsRemaining: 1,
-      unlimitedPlaysThisTurn: true,
+      playsRemaining: 3,
     });
     for (const id of ['ph1', 'ph2', 'ph3']) {
       splitState = applyCombatAction(

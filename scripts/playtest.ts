@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, restHeal, restRemoveCard, chooseDoor } from '../src/engine/runEngine.ts';
 import { createRngFromState } from '../src/engine/rng.ts';
 import { getLegalPlaySets, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
-import { SUIT_DEFINITIONS, REST_HEAL_PCT } from '../src/config/constants.ts';
+import { SUIT_DEFINITIONS, REST_HEAL_PCT, QUAKE_BONUS_PLAYS } from '../src/config/constants.ts';
 import type { RunState } from '../src/types/run.ts';
 import type { TableCard } from '../src/types/combat.ts';
 import type { SuitId, SuitCategory } from '../src/types/suits.ts';
@@ -101,7 +101,7 @@ function render(run: RunState, lastLogLength: number) {
 
   if (run.phase === 'combat' && run.combat) {
     const c = run.combat;
-    lines.push(`Combat status=${c.status} turn=${c.turnNumber} activeTurn=${c.activeTurn} playsRemaining=${c.playsRemaining}${c.unlimitedPlaysThisTurn ? ' (UNLIMITED this turn)' : ''}`);
+    lines.push(`Combat status=${c.status} turn=${c.turnNumber} activeTurn=${c.activeTurn} playsRemaining=${c.playsRemaining}`);
     lines.push(`Player Guard: ${c.playerGuard}${statusBagStr(c.playerStatuses)}`);
 
     lines.push('');
@@ -120,7 +120,7 @@ function render(run: RunState, lastLogLength: number) {
     lines.push(`Your hand (draw pile ${c.drawPile.length}, discard pile ${c.discardPile.length}):`);
     if (c.playerHand.length === 0) lines.push('  (empty)');
     for (const card of c.playerHand) {
-      if (card.kind === 'quake') lines.push(`  [${card.id}] QUAKE -- play for unlimited plays this turn`);
+      if (card.kind === 'quake') lines.push(`  [${card.id}] QUAKE -- play for +${QUAKE_BONUS_PLAYS} plays this turn`);
       else lines.push(`  [${card.id}] ${card.suit} (${suitCategory(card.suit)})`);
     }
 
@@ -161,7 +161,7 @@ function render(run: RunState, lastLogLength: number) {
     lines.push('');
     lines.push(`Choose a reward card (deck size ${run.deck.length}):`);
     run.rewardOptions.forEach((card, i) => {
-      const desc = card.kind === 'quake' ? 'QUAKE -- unlimited plays for a turn' : `${card.suit} (${suitCategory(card.suit)})`;
+      const desc = card.kind === 'quake' ? `QUAKE -- +${QUAKE_BONUS_PLAYS} plays for a turn` : `${card.suit} (${suitCategory(card.suit)})`;
       lines.push(`  [${i}] [${card.id}] ${desc}`);
     });
   }
@@ -339,7 +339,7 @@ Commands:
   state                                   reprint the current state
   play <suit> <id,id,...> [targetId]      play matching hand cards onto the table (multiplies against what's already there)
   pass                                    end your turn without playing
-  quake <cardId>                          play a Quake card (unlimited plays this turn)
+  quake <cardId>                          play a Quake card (+${QUAKE_BONUS_PLAYS} plays this turn)
   reward <cardIndex>                      pick a reward card (0-2) after clearing a room, before the door choice
   reward-pass                             decline every offered reward and proceed to the door choice
   rest-heal                               at a rest room, restore HP instead of removing a card

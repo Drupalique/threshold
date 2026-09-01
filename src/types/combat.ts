@@ -62,8 +62,11 @@ export interface CombatState {
   playerStatuses: StatusBag;
   turnNumber: number;
   activeTurn: CombatActor;
+  // A plain StS-style energy pool for the player's own turn: seeded from
+  // PLAYS_PER_TURN_BASE, spent 1-per-play, and freely raised (e.g. Quake's
+  // QUAKE_BONUS_PLAYS) or lowered by any future effect -- no separate
+  // "unlimited" bypass flag alongside it.
   playsRemaining: number;
-  unlimitedPlaysThisTurn: boolean;
   log: LogEntry[];
   status: CombatStatus;
 }

@@ -145,10 +145,12 @@ export const PLAYER_HP_MAX = 30;
 
 // --- Plays per turn ----------------------------------------------------
 // How many separate plays the player may make in a single turn before it
-// passes to the enemy phase. This is the hook point for future temporary
-// buffs/debuffs or per-run relics that grant (or cost) a play -- for now the
-// only modifier is the Quake card's unlimited-plays effect (see
-// CombatState.unlimitedPlaysThisTurn).
+// passes to the enemy phase. `CombatState.playsRemaining` is a plain numeric
+// pool seeded from this base each turn -- StS-style energy, not a countdown
+// paired with a special-cased "unlimited" flag -- so any effect (Quake's
+// bonus, a future relic/status/card) just adds to or subtracts from it
+// directly. See QUAKE_BONUS_PLAYS below for the only modifier that exists
+// today.
 export const PLAYS_PER_TURN_BASE = 2;
 
 // --- Enemies (symmetric play) ------------------------------------------
@@ -252,10 +254,15 @@ export const STARTER_DECK: CreatureCard[] = [
 // --- Rewards ------------------------------------------------------------
 
 // Odds a reward offer's slot is a Quake card instead of an ordinary suited
-// one -- deliberately rarer than an ordinary suit pick, since unlimited
-// plays for a turn is the single strongest thing a card can do, and it's a
-// permanent deck addition rather than a one-turn-only mint.
+// one -- deliberately rarer than an ordinary suit pick, since a burst of
+// extra plays for a turn is one of the strongest things a card can do, and
+// it's a permanent deck addition rather than a one-turn-only mint.
 export const QUAKE_REWARD_RATIO = 0.08;
+
+// How many bonus plays a Quake card grants (added straight to
+// CombatState.playsRemaining, on top of whatever's left this turn) when
+// played -- a flat, finite pool topper rather than true-unlimited plays.
+export const QUAKE_BONUS_PLAYS = 3;
 
 // Odds a reward offer's slot is a named special card (config/specialCards.ts)
 // instead of a plain suited one -- higher than Quake since a rider is a

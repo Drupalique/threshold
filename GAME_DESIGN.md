@@ -74,9 +74,9 @@ Every suit is fully symmetric: the player and any enemy can hold and play any of
 
 ### Plays per turn
 
-The player gets `PLAYS_PER_TURN_BASE` (**2**) separate plays per turn before control passes to the enemy phase — table/hand/enemy state carries between them, so one play can set up the next. `PLAYER_PASS` always ends the turn immediately.
+`CombatState.playsRemaining` is a plain numeric pool — StS-style energy, not a countdown paired with a special-cased "unlimited" flag — seeded each turn from `PLAYS_PER_TURN_BASE` (**2**) and spent 1-per-play regardless of set size; table/hand/enemy state carries between plays, so one play can set up the next. `PLAYER_PASS` always ends the turn immediately, and the pool itself is the only gate on how many plays a turn can hold — any future effect (card, status, relic) can raise or lower it directly, with no separate plumbing to special-case.
 
-**Quake** is a suitless, hand-only special card, offered as a reward at `QUAKE_REWARD_RATIO` (8% of reward slots): playing it grants unlimited plays for the rest of the turn, free (doesn't spend a play itself). Discarded like any other card when played, not deleted — it cycles back on the next reshuffle. Only `PLAYER_PASS` ends a Quake-boosted turn.
+**Quake** is a suitless, hand-only special card, offered as a reward at `QUAKE_REWARD_RATIO` (8% of reward slots): playing it adds `QUAKE_BONUS_PLAYS` (**3**) straight into the pool, free (doesn't spend a play itself). Discarded like any other card when played, not deleted — it cycles back on the next reshuffle. The pool is finite even after Quake, so `PLAYER_PASS` (or spending it down to 0) still ends the turn.
 
 ---
 
@@ -209,6 +209,7 @@ WEAKEN_PCT = 0.25
 
 PLAYS_PER_TURN_BASE = 2
 QUAKE_REWARD_RATIO = 0.08         REWARD_OPTION_COUNT = 3
+QUAKE_BONUS_PLAYS = 3
 SPECIAL_REWARD_RATIO = 0.15
 
 BASIC_RIDER_AMOUNT = 1     (src/config/specialCards.ts -- every plain card's rider)

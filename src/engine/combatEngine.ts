@@ -22,6 +22,7 @@ import {
   WEAKEN_PCT,
   PLAYS_PER_TURN_BASE,
   ENEMY_PLAYS_PER_TURN,
+  QUAKE_BONUS_PLAYS,
 } from '../config/constants';
 
 const suitCategory = (suit: SuitId) =>
@@ -124,7 +125,6 @@ export function initCombat(
     turnNumber: 1,
     activeTurn: 'player',
     playsRemaining: PLAYS_PER_TURN_BASE,
-    unlimitedPlaysThisTurn: false,
     log: [makeLog(0, 'system', 'round-start', `Threat looms: ${enemyList}. The room deals its neutral hand onto the table.`, snapshot)],
     status: 'active',
   };
@@ -140,7 +140,7 @@ export interface LegalPlayTarget {
 
 /** Every (suit, target) pair the player currently holds a matching, live play for -- UI legality preview. Unlike the old claim system, there's no table-size floor: any suit with >=1 matching hand card is playable, even against a 0-count table (a legitimate "banking" play). */
 export function getLegalPlaySets(state: CombatState): LegalPlayTarget[] {
-  if (state.playsRemaining <= 0 && !state.unlimitedPlaysThisTurn) return [];
+  if (state.playsRemaining <= 0) return [];
 
   const suits = new Set<SuitId>();
   for (const card of state.playerHand) {
@@ -198,7 +198,7 @@ function isLegalPlay(
   targetInstanceId: string | undefined,
   handCardIds: string[],
 ): boolean {
-  if (state.playsRemaining <= 0 && !state.unlimitedPlaysThisTurn) return false;
+  if (state.playsRemaining <= 0) return false;
   if (handCardIds.length === 0) return false;
   const uniqueIds = new Set(handCardIds);
   if (uniqueIds.size !== handCardIds.length) return false;
@@ -597,10 +597,10 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
 function endTurn(
   state: CombatState,
   rng: Rng,
-  // True when a just-resolved PLAY_SET left the player with more plays this
-  // turn (or unlimited plays are active) -- skips the player-turn-end
-  // machinery below (status ticks, the flip to the enemy phase) so the same
-  // player turn simply continues. Never set for PLAYER_PASS or ENEMY_TURN,
+  // True when a just-resolved PLAY_SET left the player with plays still
+  // remaining in the pool -- skips the player-turn-end machinery below
+  // (status ticks, the flip to the enemy phase) so the same player turn
+  // simply continues. Never set for PLAYER_PASS or ENEMY_TURN,
   // which always end their actor's turn outright.
   continuePlayerTurn: boolean = false,
 ): CombatState {
@@ -680,12 +680,11 @@ function endTurn(
       activeTurn: 'enemy',
       activeEnemyIndex: 0,
       turnNumber: next.turnNumber + 1,
-      // Plays only matter during the player's own turn -- cleared here so a
-      // stray Quake effect can't leak into bookkeeping across the enemy
-      // phase; both are reset properly when control returns to the player
-      // below.
+      // Plays only matter during the player's own turn -- zeroed here so any
+      // leftover pool (base or Quake-topped) can't leak into bookkeeping
+      // across the enemy phase; reset properly when control returns to the
+      // player below.
       playsRemaining: 0,
-      unlimitedPlaysThisTurn: false,
     };
   }
 
@@ -739,7 +738,6 @@ function endTurn(
     activeEnemyIndex: 0,
     turnNumber: newTurnNumber,
     playsRemaining: PLAYS_PER_TURN_BASE,
-    unlimitedPlaysThisTurn: false,
   };
 }
 
@@ -752,13 +750,11 @@ export function applyCombatAction(state: CombatState, action: CombatAction, rng:
     if (state.activeTurn !== 'player') return state;
     if (!isLegalPlay(state, action.suit, action.targetInstanceId, action.handCardIds)) return state;
     let played = performPlay(state, { kind: 'player' }, action.suit, action.targetInstanceId, action.handCardIds);
-    // Unlimited plays (Quake) never spend down; otherwise this play spends
-    // exactly one of the turn's plays regardless of how many hand cards it
-    // used.
-    if (!played.unlimitedPlaysThisTurn) {
-      played = { ...played, playsRemaining: played.playsRemaining - 1 };
-    }
-    const turnContinues = played.unlimitedPlaysThisTurn || played.playsRemaining > 0;
+    // Every play spends exactly one of the turn's plays regardless of how
+    // many hand cards it used -- the pool itself is what a bonus like
+    // Quake's tops up, so there's no separate spend-bypass case any more.
+    played = { ...played, playsRemaining: played.playsRemaining - 1 };
+    const turnContinues = played.playsRemaining > 0;
     return endTurn(played, rng, turnContinues);
   }
 
@@ -766,22 +762,23 @@ export function applyCombatAction(state: CombatState, action: CombatAction, rng:
     if (state.activeTurn !== 'player') return state;
     const card = state.playerHand.find((c) => c.id === action.cardId);
     if (!card || card.kind !== 'quake') return state;
-    // A free action -- doesn't spend a play and never ends the turn itself;
-    // only Pass (or running out of plays without this card) does that.
-    // Playing it discards it, same as any other played card, so it comes
-    // back around next reshuffle instead of vanishing for the room.
+    // A free action -- doesn't spend a play itself and never ends the turn;
+    // it just tops up the same numeric pool PLAY_SET spends from. Playing it
+    // discards it, same as any other played card, so it comes back around
+    // next reshuffle instead of vanishing for the room.
+    const playsRemaining = state.playsRemaining + QUAKE_BONUS_PLAYS;
     return {
       ...state,
       playerHand: state.playerHand.filter((c) => c.id !== action.cardId),
       discardPile: [...state.discardPile, card],
-      unlimitedPlaysThisTurn: true,
+      playsRemaining,
       log: [
         ...state.log,
         makeLog(
           state.turnNumber,
           'player',
           'quake',
-          'Player unleashes the Quake card -- unlimited plays this turn!',
+          `Player unleashes the Quake card -- +${QUAKE_BONUS_PLAYS} plays this turn (${playsRemaining} now available)!`,
           snapshotOf(state),
         ),
       ],

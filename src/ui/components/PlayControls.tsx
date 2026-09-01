@@ -15,9 +15,9 @@ interface PlayControlsProps {
   // enemies to choose from and none has been picked yet -- picked by
   // clicking the enemy's card directly (see EnemyPanel), not a menu here.
   needsTarget: boolean;
-  // False once the turn's plays are used up and no unlimited-plays grant is
-  // active -- playing is disabled regardless of what's selected, and the
-  // player must Pass to end the turn.
+  // False once the turn's plays pool is spent down to 0 -- playing is
+  // disabled regardless of what's selected, and the player must Pass to end
+  // the turn.
   hasPlaysLeft: boolean;
   onPlay: () => void;
   onPass: () => void;
