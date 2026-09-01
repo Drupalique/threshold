@@ -3,7 +3,6 @@ import type { EnemyInstance } from '../../types/enemy';
 import type { SuitId } from '../../types/suits';
 import { SUIT_DEFINITIONS } from '../../config/constants';
 import { CardChip } from './CardChip';
-import { suitIcon } from '../suitIcons';
 
 interface TableDisplayProps {
   table: TableCard[];
@@ -62,7 +61,6 @@ function OwnerLane({
           const suitCards = groups.get(suitId)!;
           const total = totalBySuit.get(suitId) ?? suitCards.length;
           const isHighlighted = highlightSuit === suitId;
-          const label = SUIT_DEFINITIONS.find((s) => s.id === suitId)!.name;
 
           return (
             <div
@@ -74,10 +72,17 @@ function OwnerLane({
                 .filter(Boolean)
                 .join(' ')}
             >
-              <div className="table-group-label">
-                {suitIcon(suitId)} {label} x{suitCards.length}
-                {total !== suitCards.length && <span className="table-group-total"> (table total x{total})</span>}
-              </div>
+              {/* No icon/name/count label here -- each card chip below
+                  already carries its own suit icon and name (CardChip's
+                  CardFace), and this lane's own count is just as visible by
+                  counting those chips. Only the combined total across every
+                  owner isn't visible from this lane alone, so that's the one
+                  thing still called out when it differs. */}
+              {total !== suitCards.length && (
+                <div className="table-group-label">
+                  <span className="table-group-total">table total x{total}</span>
+                </div>
+              )}
               <div className="table-group-cards">
                 {suitCards.map((c) => (
                   <CardChip key={c.id} card={{ id: c.id, kind: 'creature', suit: c.suit }} showRider={false} />
