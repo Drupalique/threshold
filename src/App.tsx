@@ -5,6 +5,7 @@ import { StartScreen } from './ui/screens/StartScreen';
 import { CombatScreen } from './ui/screens/CombatScreen';
 import { RestScreen } from './ui/screens/RestScreen';
 import { ShrineScreen } from './ui/screens/ShrineScreen';
+import { ShopScreen } from './ui/screens/ShopScreen';
 import { RewardScreen } from './ui/screens/RewardScreen';
 import { DoorChoiceScreen } from './ui/screens/DoorChoiceScreen';
 import { RunEndScreen } from './ui/screens/RunEndScreen';
@@ -23,6 +24,8 @@ function Router() {
       return <RestScreen />;
     case 'shrine':
       return <ShrineScreen />;
+    case 'shop':
+      return <ShopScreen />;
     case 'reward':
       return <RewardScreen />;
     case 'door-choice':
@@ -66,6 +69,11 @@ function CombatTopBarStatus() {
           {` -- ${combat.playsRemaining} play${combat.playsRemaining === 1 ? '' : 's'} left`}
         </span>
       )}
+      {/* Live during combat since claim-overflow currency (see
+          combatEngine.ts's applyCurrencyOverflow) is earned mid-fight, not
+          just at a shop -- surfacing it here lets a player see it tick up
+          as it happens. */}
+      <span className="topbar-currency">{` -- ${combat.currency} currency`}</span>
     </div>
   );
 }

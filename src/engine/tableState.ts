@@ -10,6 +10,11 @@ export function countTableSetSize(table: TableCard[], suit: SuitId): number {
   return table.filter((c) => c.suit === suit).length;
 }
 
+/** How many of the room's own (ownerId: 'room') table cards of `suit` are currently visible -- unlike countTableSetSize, excludes the player's/an enemy's own contribution. Used to size claim-overflow currency (see combatEngine.ts's applyCurrencyOverflow), which is specifically about the room's own accumulated pile, not the table total. */
+export function roomOwnedCount(table: TableCard[], suit: SuitId): number {
+  return table.filter((c) => c.suit === suit && c.ownerId === 'room').length;
+}
+
 /** Removes every table card belonging to `ownerId` -- the "discard your own play area at the start of your turn" rule, applied identically to the player and each enemy. The room no longer goes through this: its cards persist across rounds and are only ever removed via claimRoomCards. */
 export function wipeOwnerTable(table: TableCard[], ownerId: TableOwnerId): TableCard[] {
   return table.filter((c) => c.ownerId !== ownerId);

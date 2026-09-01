@@ -16,7 +16,7 @@ import type { EnemyInstance } from '../../types/enemy';
 import type { CombatState, TableCard } from '../../types/combat';
 import type { Card, CreatureCard } from '../../types/cards';
 import type { SuitId } from '../../types/suits';
-import { PLAYS_PER_TURN_BASE, QUAKE_BONUS_PLAYS } from '../../config/constants';
+import { PLAYS_PER_TURN_BASE, QUAKE_BONUS_PLAYS, CURRENCY_CLAIM_THRESHOLD } from '../../config/constants';
 import { relicById } from '../../config/relics';
 import { potionById } from '../../config/potions';
 
@@ -1423,5 +1423,90 @@ describe('potions', () => {
 
     const next = applyCombatAction(state, { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e1' }, rng);
     expect(next.potions).toEqual([potionById('free-claim'), potionById('salt')]);
+  });
+});
+
+function roomPile(suit: SuitId, count: number, prefix = 't'): TableCard[] {
+  return Array.from({ length: count }, (_, i) => ({ id: `${prefix}${i}`, suit, ownerId: 'room' as const }));
+}
+
+describe('currency (claim overflow)', () => {
+  it('a real play claiming a room pile above the threshold converts the excess 1:1 into currency', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 60, hpMax: 60 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: roomPile('wolf', CURRENCY_CLAIM_THRESHOLD + 3),
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+      currency: 0,
+    });
+
+    const next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] }, rng);
+
+    expect(next.currency).toBe(3);
+    expect(next.log.some((l) => l.type === 'currency' && l.message.includes('+3 currency'))).toBe(true);
+  });
+
+  it('a claim at or below the threshold grants no currency', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 60, hpMax: 60 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: roomPile('wolf', CURRENCY_CLAIM_THRESHOLD),
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+      currency: 0,
+    });
+
+    const next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] }, rng);
+
+    expect(next.currency).toBe(0);
+    expect(next.log.some((l) => l.type === 'currency')).toBe(false);
+  });
+
+  it('a Free Claim potion converts overflow off the room-owned count specifically, not the combined-owner total Free Claim itself resolves', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 60, hpMax: 60 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [...roomPile('wolf', CURRENCY_CLAIM_THRESHOLD + 1), { id: 'p1', suit: 'wolf', ownerId: 'player' }],
+      potions: [potionById('free-claim')],
+      currency: 0,
+    });
+
+    const next = applyCombatAction(state, { type: 'USE_FREE_CLAIM_POTION', suit: 'wolf', targetInstanceId: 'e1' }, rng);
+
+    // Free Claim's own damage reads all 7 (6 room + 1 player), but currency
+    // overflow is only off the 6 room-owned cards: 6 - 5 = 1.
+    expect(next.enemies[0].hp).toBe(60 - 7);
+    expect(next.currency).toBe(1);
+  });
+
+  it('a Salt potion converts the discarded room pile\'s overflow into currency even though nothing else resolves', () => {
+    const room = makeRoom();
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: roomPile('wolf', CURRENCY_CLAIM_THRESHOLD + 4),
+      potions: [potionById('salt')],
+      currency: 2,
+    });
+
+    const next = applyCombatAction(state, { type: 'USE_SALT_POTION', suit: 'wolf' }, rng);
+
+    expect(next.currency).toBe(2 + 4);
+  });
+
+  it('an enemy\'s own claim never grants the player currency', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1' })] });
+    const rng = createRng(70);
+    const state: CombatState = makeCombat(room, rng, 30, 30, {
+      table: roomPile('wolf', CURRENCY_CLAIM_THRESHOLD + 5),
+      playerHand: [],
+      enemies: [makeEnemy({ instanceId: 'e1', hand: [{ id: 'e1h1', kind: 'creature', suit: 'wolf' }] })],
+      activeTurn: 'enemy',
+      activeEnemyIndex: 0,
+      currency: 0,
+    });
+
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+
+    expect(next.currency).toBe(0);
+    expect(next.log.some((l) => l.type === 'currency')).toBe(false);
   });
 });

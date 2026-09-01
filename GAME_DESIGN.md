@@ -87,6 +87,10 @@ Consumable, run-persistent items (`RunState.potions`/`CombatState.potions`, `typ
 
 Acquired only from the reward screen (`POTION_REWARD_RATIO`, same slot shape as a relic — see §11), duplicates allowed (unlike relics), capped combined at `POTION_INVENTORY_CAP` held at once (the reward screen stops offering potions past the cap). Held potions persist across rooms/rest/reward passes like relics, and are only ever removed by being used.
 
+### Currency
+
+A run-persistent numeric resource (`RunState.currency`/`CombatState.currency`, same persistence and sync-back shape as `playerHP`/`potions` — see `runEngine.ts`'s `applyCombatAction`), earned from claim overflow rather than a kill-counter or flat per-room drop: whenever a claim — a real play, or a Free Claim/Salt potion use — reads a **room-owned** pile (`ownerId: 'room'`, not the table total across every owner) above `CURRENCY_CLAIM_THRESHOLD` (**5**), the amount over the threshold converts 1:1 into currency (`combatEngine.ts`'s `applyCurrencyOverflow`, called from `performPlay`, `resolveFreeClaimEffect`, and `resolveSaltEffect`). Ties currency generation to the thing this game specifically rewards — letting a room pile grow big before claiming it — rather than layering on an unrelated resource. An enemy's own claim of the same pile never generates currency; only the player's own claims do. Spent at shop rooms (§6).
+
 ---
 
 ## 3. Enemies
@@ -182,6 +186,12 @@ At a rest room the player picks **exactly one** of two mutually exclusive option
 
 A rest room's door tags are deliberately uncorrelated noise (`runTree.ts`'s `trueTagsForRoom`) rather than a reliable "this door is safe" tell — same fallback an untyped-suit combat room's color already gets. The door screen's full tree reveal (above) makes this moot for now, since a rest room shows up plainly in the preview regardless of its tags; the noise only matters again once the reveal is dialed back.
 
+### Shop rooms
+
+Each tree node below floor `RUN_MAX_DEPTH` independently rolls `SHOP_ROOM_RATIO` (**8%**, same tier as `SHRINE_ROOM_RATIO`) to be a shop (`ShopRoomInstance`, `types/room.ts`) instead of a combat room, same never-on-the-final-floor/never-the-first-room exclusions as rest rooms and shrines. Like a shrine, a shop's offer isn't precomputed in the tree — it must exclude relics the player already holds and respect the potion inventory cap by the time they arrive, so `chooseDoor` generates it live off `run.rng` (`rewardGenerator.ts`'s `generateShopOptions`) the moment the door is chosen, setting `RunState.phase` to `'shop'` with `combat: null`, rendered by `ShopScreen.tsx`.
+
+A shop offers `SHOP_OPTION_COUNT` (**4**) priced slots, drawn from the exact same category pool the reward screen uses (an ordinary suited card, a named special, Quake, a relic, or a potion — same odds, same held-relic/potion-cap exclusion), but each slot carries a fixed price by its `optionType` rather than being a free pick — "spendable only at a fixed currency rate," not a fluctuating market: `SHOP_CARD_PRICE` (**8**), `SHOP_RELIC_PRICE` (**20**), `SHOP_POTION_PRICE` (**10**). Unlike the reward screen's exclusive pick-1, a single shop visit can buy **any number** of its offered slots (`runEngine.ts`'s `buyShopOption`, one purchase at a time, each deducting that slot's price from `RunState.currency` and applying it to `deck`/`relics`/`potions`) — that's what makes it "a wider offering" rather than a reskinned reward screen. `leaveShop` proceeds to the next door choice whenever the player is done, same shape as `skipReward`/`skipShrine`.
+
 ---
 
 ## 7. Player state and win/loss
@@ -229,6 +239,10 @@ RIDER_AMOUNT = 3           (src/config/specialCards.ts -- every named special ca
 DOOR_CORRELATION_RATE = 0.75
 REST_ROOM_RATIO = 0.15    (per door candidate, never on the RUN_MAX_DEPTH room)
 REST_HEAL_PCT = 0.3       (of playerHPMax, rounded, capped at max)
+SHRINE_ROOM_RATIO = 0.08  SHOP_ROOM_RATIO = 0.08   (per door candidate, same exclusions as REST_ROOM_RATIO)
+SHOP_OPTION_COUNT = 4
+CURRENCY_CLAIM_THRESHOLD = 5   (room-owned pile size a claim must exceed to yield currency)
+SHOP_CARD_PRICE = 8   SHOP_RELIC_PRICE = 20   SHOP_POTION_PRICE = 10
 RUN_MAX_DEPTH = 10
 STARTER_DECK = 19 cards (3×4 threat suits, 2×Grace, 2×Ward, 1 each Hex/Venom/Vigor)
 
@@ -239,7 +253,7 @@ STARTER_DECK = 19 cards (3×4 threat suits, 2×Grace, 2×Ward, 1 each Hex/Venom/
 
 ## 9. Playtest tooling
 
-`scripts/playtest.ts` (interactive CLI, one command per decision) and `scripts/playtest-sim.ts` (batch simulator with a scored heuristic bot, plus an optional `PLAYTEST_BOT=llm` mode via `scripts/llmBot.ts`) both drive the real engine directly — no UI, no mocking. They're excluded from `tsconfig`'s `include` (they're Node scripts, not app code), so `npx tsc -b` doesn't typecheck them; verify changes to them by actually running `npx tsx scripts/playtest.ts new` / `npx tsx scripts/playtest-sim.ts` rather than trusting the main build. No decay, feed, or fixed-pattern concepts remain in either script — they were fully removed along with the mechanics themselves, not left as dead branches. The CLI's `rest-heal`/`rest-remove <cardId>` commands and the sim's `pickRestAction` heuristic (heal whenever HP is missing, otherwise remove a card from the deck's most-overrepresented suit) drive the rest-room phase (§6) the same way `reward`/`door` and `pickReward`/`pickDoor` already drive theirs.
+`scripts/playtest.ts` (interactive CLI, one command per decision) and `scripts/playtest-sim.ts` (batch simulator with a scored heuristic bot, plus an optional `PLAYTEST_BOT=llm` mode via `scripts/llmBot.ts`) both drive the real engine directly — no UI, no mocking. They're excluded from `tsconfig`'s `include` (they're Node scripts, not app code), so `npx tsc -b` doesn't typecheck them; verify changes to them by actually running `npx tsx scripts/playtest.ts new` / `npx tsx scripts/playtest-sim.ts` rather than trusting the main build. No decay, feed, or fixed-pattern concepts remain in either script — they were fully removed along with the mechanics themselves, not left as dead branches. The CLI's `rest-heal`/`rest-remove <cardId>` commands and the sim's `pickRestAction` heuristic (heal whenever HP is missing, otherwise remove a card from the deck's most-overrepresented suit) drive the rest-room phase (§6) the same way `reward`/`door` and `pickReward`/`pickDoor` already drive theirs. Likewise, the CLI's `shop <optionIndex>`/`shop-leave` commands and the sim's `pickShopPurchases` heuristic (greedily buy every affordable option, relics first, then potions, then cards, repeating until nothing's left affordable) drive the shop phase (§6).
 
 ## 10. Where the design is shakiest right now
 
@@ -259,4 +273,4 @@ Design directions raised in response to §10's gaps, recorded here so future wor
 - **Card removal** — done, but living in the rest room (§6) rather than as a reward-screen slot as originally sketched here: `restRemoveCard` lets the player permanently cut one card from `run.deck`. A reward-screen removal slot (alongside suit/Quake/special) is still a possible follow-up if rest rooms alone don't turn out to hit the suit-diversity gap often enough (§10) — the two aren't mutually exclusive.
 - **Relics** — done: suit-bound and rider-mutator relics (`types/relics.ts`, `config/relics.ts`, `combatEngine.ts`'s `applyRelics`), acquired via a reward-screen slot or a dedicated shrine room. Anti-symmetric relics (breaking the player/enemy rule symmetry, §3) remain unbuilt.
 - **Potions** — done (§2): Free Claim and Salt, consumable reward-screen items acting directly on the table outside the play/hand economy.
-- **Shops** — a room (or reward-adjacent) type where the player spends a resource to pick from a wider offering (cards, removals, maybe relics) rather than a free forced pick-1-of-3, or a free exclusive heal-or-cut. The largest remaining lift: there is currently no currency/resource concept anywhere in `RunState` at all, so this depends on that being designed first (what it's earned from, whether it persists or is per-room, etc.). Rest rooms have now proven out the "non-combat room" plumbing (`RoomInstance.kind`, a dedicated `RunState.phase`, a dedicated screen) a shop room would reuse the same shape of.
+- **Shops** — done (§2's Currency subsection, §6's Shop rooms subsection): `ShopRoomInstance` room kind, a `'shop'` run phase, `ShopScreen.tsx` offering `SHOP_OPTION_COUNT` priced slots any number of which can be bought in one visit. Currency (§2) is earned from claim overflow rather than a kill-counter or flat per-room drop, and is the resource this always depended on being designed first.

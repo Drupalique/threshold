@@ -303,6 +303,39 @@ export const POTION_INVENTORY_CAP = 4;
 
 export const REWARD_OPTION_COUNT = 3;
 
+// --- Currency ------------------------------------------------------------
+// Earned from claim overflow (MECHANIC_BRAINSTORM.md's "Currency from claim
+// overflow, feeding a shop room"): whenever a claim (a real play, or a Free
+// Claim/Salt potion use) reads a room-owned pile above this size, the amount
+// over the threshold converts 1:1 into RunState/CombatState.currency -- see
+// combatEngine.ts's applyCurrencyOverflow. Ties currency to the thing this
+// game specifically rewards (letting a room pile grow big before claiming
+// it) rather than a kill-counter or flat per-room drop. First-cut number,
+// not balance-tested.
+export const CURRENCY_CLAIM_THRESHOLD = 5;
+
+// --- Shops ----------------------------------------------------------------
+// Independent per-door-candidate odds a door leads to a shop instead of a
+// combat room -- rolled alongside REST_ROOM_RATIO/SHRINE_ROOM_RATIO, same
+// never-on-the-final-floor exclusion. Same tier as SHRINE_ROOM_RATIO: a
+// currency-gated wider offering is a comparably rare find to a relic.
+export const SHOP_ROOM_RATIO = 0.08;
+
+// How many priced options a shop offers at once -- deliberately more than
+// REWARD_OPTION_COUNT, since (unlike the reward screen's exclusive pick-1)
+// a shop visit can buy several of its offered slots, so "a wider offering"
+// needs more slots on the table to begin with.
+export const SHOP_OPTION_COUNT = 4;
+
+// Fixed price per offered optionType -- "spendable only at a fixed currency
+// rate" per the brainstorm entry, not a fluctuating market. First-cut
+// numbers, not balance-tested: a card costs less than a room's typical
+// overflow yield from a couple of big claims; a relic (run-long passive)
+// costs meaningfully more than a potion (consumable).
+export const SHOP_CARD_PRICE = 8;
+export const SHOP_RELIC_PRICE = 20;
+export const SHOP_POTION_PRICE = 10;
+
 // --- UI pacing only (not engine) --------------------------------------
 
 export const TURN_ANIMATION_DELAY_MS = 600;

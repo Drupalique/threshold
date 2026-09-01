@@ -81,6 +81,11 @@ export interface CombatState {
   // applyCombatAction wrapper syncs the result back into RunState.potions
   // the same way it already does for playerHP.
   potions: PotionDef[];
+  // Copied in once from RunState.currency at initCombat, then grown by
+  // claim-overflow conversions (see combatEngine.ts's applyCurrencyOverflow)
+  // -- runEngine.ts's applyCombatAction wrapper syncs the result back into
+  // RunState.currency the same way it already does for playerHP/potions.
+  currency: number;
 }
 
 /**

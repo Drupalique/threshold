@@ -17,7 +17,7 @@
 //
 // Usage: npx tsx scripts/playtest-sim.ts [numRuns] [startSeed]
 //        PLAYTEST_BOT=llm npx tsx scripts/playtest-sim.ts 1 1
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor, restHeal, restRemoveCard, chooseRelic, skipShrine } from '../src/engine/runEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, chooseDoor, restHeal, restRemoveCard, chooseRelic, skipShrine, buyShopOption, leaveShop } from '../src/engine/runEngine.ts';
 import { getLegalPlaySets, getLegalFreeClaimUses, getLegalSaltUses, type LegalPlayTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS } from '../src/config/constants.ts';
 import { pickLlmPlay, llmStats, type LlmChosenPlay } from './llmBot.ts';
@@ -64,6 +64,9 @@ interface Metrics {
   freeClaimUsed: number;
   saltUsed: number;
   potionsHeldAtRunEnd: number[];
+  shopRoomsSeen: number;
+  shopPurchases: Record<'card' | 'relic' | 'potion', number>;
+  currencyHeldAtRunEnd: number[];
 }
 
 function freshMetrics(): Metrics {
@@ -96,6 +99,9 @@ function freshMetrics(): Metrics {
     freeClaimUsed: 0,
     saltUsed: 0,
     potionsHeldAtRunEnd: [],
+    shopRoomsSeen: 0,
+    shopPurchases: { card: 0, relic: 0, potion: 0 },
+    currencyHeldAtRunEnd: [],
   };
 }
 
@@ -231,6 +237,27 @@ function pickReward(run: RunState): string {
 function pickShrine(run: RunState): string | null {
   const options = run.shrineOptions!;
   return options[0]?.id ?? null;
+}
+
+/**
+ * Shop-buy heuristic: greedily buy every affordable option, relics first
+ * (same "assumed strictly worth it" bias pickReward/pickShrine use), then
+ * potions, then cards, repeating until nothing left is affordable -- a shop
+ * visit can buy several slots (runEngine.ts's buyShopOption), unlike the
+ * exclusive pick-1 reward/shrine screens.
+ */
+function pickShopPurchases(run: RunState): RunState {
+  const priority: Record<'relic' | 'potion' | 'card', number> = { relic: 0, potion: 1, card: 2 };
+  let next = run;
+  for (;;) {
+    const options = next.shopOptions ?? [];
+    const affordable = options.filter((o) => o.price <= next.currency);
+    if (affordable.length === 0) break;
+    const chosen = affordable.reduce((a, b) => (priority[b.optionType] < priority[a.optionType] ? b : a));
+    m.shopPurchases[chosen.optionType]++;
+    next = buyShopOption(next, chosen.id);
+  }
+  return leaveShop(next);
 }
 
 /**
@@ -429,6 +456,7 @@ async function playRun(seed: number): Promise<void> {
     run.phase === 'combat' ||
     run.phase === 'rest' ||
     run.phase === 'shrine' ||
+    run.phase === 'shop' ||
     run.phase === 'reward' ||
     run.phase === 'door-choice'
   ) {
@@ -457,6 +485,11 @@ async function playRun(seed: number): Promise<void> {
       } else {
         run = skipShrine(run);
       }
+      continue;
+    }
+    if (run.phase === 'shop') {
+      m.shopRoomsSeen++;
+      run = pickShopPurchases(run);
       continue;
     }
     if (run.phase === 'reward') {
@@ -510,6 +543,7 @@ async function playRun(seed: number): Promise<void> {
   m.depthReached.push(run.depth);
   m.relicsHeldAtRunEnd.push(run.relics.length);
   m.potionsHeldAtRunEnd.push(run.potions.length);
+  m.currencyHeldAtRunEnd.push(run.currency);
   if (run.phase === 'run-complete') m.wins++;
   else if (run.phase === 'run-over') m.losses++;
   else m.anomalies++;
@@ -593,6 +627,12 @@ const report = {
     freeClaimUsed: m.freeClaimUsed,
     saltUsed: m.saltUsed,
     heldAtRunEnd: stats(m.potionsHeldAtRunEnd),
+  },
+  shops: {
+    seen: m.shopRoomsSeen,
+    perRun: Number((m.shopRoomsSeen / m.runs).toFixed(2)),
+    purchases: m.shopPurchases,
+    currencyHeldAtRunEnd: stats(m.currencyHeldAtRunEnd),
   },
 };
 

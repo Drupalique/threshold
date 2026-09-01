@@ -1,4 +1,4 @@
-import type { CombatRoomInstance, RestRoomInstance, ShrineRoomInstance, RoomParams, PoolSizeBand } from '../types/room';
+import type { CombatRoomInstance, RestRoomInstance, ShrineRoomInstance, ShopRoomInstance, RoomParams, PoolSizeBand } from '../types/room';
 import type { EnemyInstance } from '../types/enemy';
 import type { SuitId } from '../types/suits';
 import type { Rng } from './rng';
@@ -149,4 +149,9 @@ export function generateRestRoom(id: string): RestRoomInstance {
 /** A relic-offering shrine -- no table, no enemies, and (unlike combat/rest rooms) no precomputed content: see types/room.ts's ShrineRoomInstance for why its relic offer is generated live instead. See runTree.ts's SHRINE_ROOM_RATIO roll. */
 export function generateShrineRoom(id: string): ShrineRoomInstance {
   return { kind: 'shrine', id };
+}
+
+/** A currency shop -- no table, no enemies, and (like a shrine) no precomputed content: see types/room.ts's ShopRoomInstance for why its offer is generated live instead. See runTree.ts's SHOP_ROOM_RATIO roll. */
+export function generateShopRoom(id: string): ShopRoomInstance {
+  return { kind: 'shop', id };
 }

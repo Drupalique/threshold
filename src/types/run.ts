@@ -12,6 +12,7 @@ export type RunPhase =
   | 'rest'
   | 'reward'
   | 'shrine'
+  | 'shop'
   | 'door-choice'
   | 'run-complete'
   | 'run-over';
@@ -23,6 +24,15 @@ export type RewardOption =
   | { id: string; optionType: 'card'; card: Card }
   | { id: string; optionType: 'relic'; relic: RelicDef }
   | { id: string; optionType: 'potion'; potion: PotionDef };
+
+// A shop-screen slot -- same three-way shape as RewardOption, plus a fixed
+// price (see config/constants.ts's SHOP_CARD_PRICE/SHOP_RELIC_PRICE/
+// SHOP_POTION_PRICE). Unlike a reward, several of these can be bought in one
+// shop visit -- see runEngine.ts's buyShopOption.
+export type ShopOption =
+  | { id: string; optionType: 'card'; price: number; card: Card }
+  | { id: string; optionType: 'relic'; price: number; relic: RelicDef }
+  | { id: string; optionType: 'potion'; price: number; potion: PotionDef };
 
 export interface RunState {
   seed: number;
@@ -51,12 +61,22 @@ export interface RunState {
   // runEngine.ts's applyCombatAction the same way playerHP is). Unlike
   // relics, duplicates are allowed and a used potion is actually consumed.
   potions: PotionDef[];
+  // Persistent, run-level currency (see MECHANIC_BRAINSTORM.md's "Currency
+  // from claim overflow, feeding a shop room") -- grown by claim-overflow
+  // conversions during combat (synced out of CombatState.currency by
+  // applyCombatAction, same as playerHP/potions) and spent by
+  // buyShopOption. Never resets mid-run, same persistence as deck/relics/
+  // potions.
+  currency: number;
   // Set by resolveCombatEnd's room-cleared branch, consumed by chooseReward.
   // Null outside the 'reward' phase.
   rewardOptions: RewardOption[] | null;
   // Set by chooseDoor's shrine branch, consumed by chooseRelic/skipShrine.
   // Null outside the 'shrine' phase.
   shrineOptions: RelicDef[] | null;
+  // Set by chooseDoor's shop branch, shrunk as options are bought
+  // (buyShopOption), cleared by leaveShop. Null outside the 'shop' phase.
+  shopOptions: ShopOption[] | null;
   // The entire run's precomputed branching structure (see types/runTree.ts,
   // engine/runTree.ts's buildRunTree) -- built once from the seed at
   // createNewRun and held for the run's whole lifetime, not just the path

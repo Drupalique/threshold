@@ -20,6 +20,10 @@ export function summarizeRoom(room: RoomInstance): RoomSummary {
     return { label: 'Shrine', detail: ['Shrine -- choose a relic'] };
   }
 
+  if (room.kind === 'shop') {
+    return { label: 'Shop', detail: ['Shop -- spend currency on cards, relics, or potions'] };
+  }
+
   const names = room.enemies.map((e) => `${e.name}${e.isElite ? ' (Elite)' : ''} (${e.hpMax} HP)`);
   const label =
     room.enemies.length === 1

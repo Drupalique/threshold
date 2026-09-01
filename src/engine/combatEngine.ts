@@ -13,7 +13,7 @@ import type {
 } from '../types/combat';
 import type { Rng } from './rng';
 import { shuffleDeck, drawCards, topUpHand } from './deckState';
-import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTableForRound } from './tableState';
+import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTableForRound, roomOwnedCount } from './tableState';
 import { chooseEnemyPlay } from './enemyAI';
 import { enemyDefById } from '../config/enemies';
 import { specialCardById, riderForCard } from '../config/specialCards';
@@ -25,6 +25,7 @@ import {
   PLAYS_PER_TURN_BASE,
   ENEMY_PLAYS_PER_TURN,
   QUAKE_BONUS_PLAYS,
+  CURRENCY_CLAIM_THRESHOLD,
 } from '../config/constants';
 
 const suitCategory = (suit: SuitId) =>
@@ -89,6 +90,7 @@ export function initCombat(
   playerDeck: Card[],
   relics: RelicDef[] = [],
   potions: PotionDef[] = [],
+  currency: number = 0,
 ): CombatState {
   const snapshot: MeterSnapshot = { playerHP, playerHPMax, playerGuard: 0 };
   const enemyList = room.enemies.map((e) => `${e.name} (${e.hp} HP)`).join(', ');
@@ -133,6 +135,37 @@ export function initCombat(
     status: 'active',
     relics,
     potions,
+    currency,
+  };
+}
+
+/**
+ * Converts room-pile overflow into currency (MECHANIC_BRAINSTORM.md's
+ * "Currency from claim overflow"): whenever a claim -- a real play, or a
+ * Free Claim/Salt potion use -- reads a room-owned pile above
+ * CURRENCY_CLAIM_THRESHOLD, the amount over the threshold is added 1:1 to
+ * currency. `roomCountBeforeClaim` must be read by the caller before
+ * claimRoomCards removes those cards. A no-op (returns state unchanged) when
+ * the pile doesn't clear the threshold, so callers can call this
+ * unconditionally after every claim.
+ */
+function applyCurrencyOverflow(state: CombatState, roomCountBeforeClaim: number): CombatState {
+  const overflow = roomCountBeforeClaim - CURRENCY_CLAIM_THRESHOLD;
+  if (overflow <= 0) return state;
+  const currency = state.currency + overflow;
+  return {
+    ...state,
+    currency,
+    log: [
+      ...state.log,
+      makeLog(
+        state.turnNumber,
+        'player',
+        'currency',
+        `The claimed pile (${roomCountBeforeClaim}, past the ${CURRENCY_CLAIM_THRESHOLD}-card threshold) yields +${overflow} currency (${currency} total).`,
+        snapshotOf(state),
+      ),
+    ],
   };
 }
 
@@ -362,6 +395,11 @@ function performPlay(
 
   const ownerId = ownerIdOf(actor);
   const playedIdSet = new Set(handCardIds);
+  // Read before claimRoomCards below removes them -- see
+  // applyCurrencyOverflow. Only the player's own claim ever converts to
+  // currency (see the call site after the play's own log line); an enemy's
+  // claim of the same pile never does.
+  const roomCountBeforeClaim = roomOwnedCount(state.table, suit);
 
   let next: CombatState = state;
   let playedCards: CreatureCard[];
@@ -486,6 +524,9 @@ function performPlay(
     ],
   };
 
+  if (actor.kind === 'player') {
+    next = applyCurrencyOverflow(next, roomCountBeforeClaim);
+  }
   next = applyRiders(next, actor, targetInstanceId, playedCards);
   next = applyRelics(next, actor, category, suit, targetInstanceId);
 
@@ -731,6 +772,10 @@ function resolveFreeClaimEffect(
   amount: number,
 ): CombatState {
   const category = suitCategory(suit);
+  // amount (above) is the table total across every owner -- currency
+  // overflow specifically cares about the room's own pile, so this is read
+  // separately (see applyCurrencyOverflow).
+  const roomCountBeforeClaim = roomOwnedCount(state.table, suit);
   let next: CombatState = { ...state, table: claimRoomCards(state.table, suit) };
   let effectDesc: string;
   let targetName: string | undefined;
@@ -772,7 +817,7 @@ function resolveFreeClaimEffect(
     effectDesc = `gaining +${amount} Strength (${totalStacks} stack${totalStacks === 1 ? '' : 's'})`;
   }
 
-  return {
+  next = {
     ...next,
     log: [
       ...next.log,
@@ -785,12 +830,13 @@ function resolveFreeClaimEffect(
       ),
     ],
   };
+  return applyCurrencyOverflow(next, roomCountBeforeClaim);
 }
 
 /** Discards the room's own pile of `suit` outright -- no effect resolved, same claimRoomCards call a real play's claim uses, just without reading the count into anything. */
 function resolveSaltEffect(state: CombatState, suit: SuitId, roomCount: number): CombatState {
-  const next: CombatState = { ...state, table: claimRoomCards(state.table, suit) };
-  return {
+  let next: CombatState = { ...state, table: claimRoomCards(state.table, suit) };
+  next = {
     ...next,
     log: [
       ...next.log,
@@ -803,6 +849,7 @@ function resolveSaltEffect(state: CombatState, suit: SuitId, roomCount: number):
       ),
     ],
   };
+  return applyCurrencyOverflow(next, roomCount);
 }
 
 // --- Enemy turn resolution -----------------------------------------------

@@ -5,7 +5,7 @@ import type { CombatAction } from '../types/combat';
 import { createRng } from './rng';
 import { buildRunTree } from './runTree';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
-import { generateRewardOptions, generateShrineOptions } from './rewardGenerator';
+import { generateRewardOptions, generateShrineOptions, generateShopOptions } from './rewardGenerator';
 import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
 
 export function createNewRun(seed: number): RunState {
@@ -22,8 +22,10 @@ export function createNewRun(seed: number): RunState {
     deck: [...STARTER_DECK],
     relics: [],
     potions: [],
+    currency: 0,
     rewardOptions: null,
     shrineOptions: null,
+    shopOptions: null,
     currentDoors: null,
     combat: null,
   };
@@ -33,7 +35,7 @@ export function startFirstRoom(run: RunState): RunState {
   const node = run.runTree.nodes[run.currentPath];
   // The floor-1 root is always a combat room (see runTree.ts's buildRunTree
   // -- the very first room has no door choice, so it can never roll rest).
-  const combat = initCombat(node.room as CombatRoomInstance, run.rng, run.playerHP, run.playerHPMax, run.deck, run.relics, run.potions);
+  const combat = initCombat(node.room as CombatRoomInstance, run.rng, run.playerHP, run.playerHPMax, run.deck, run.relics, run.potions, run.currency);
   return { ...run, phase: 'combat', combat };
 }
 
@@ -48,7 +50,7 @@ export function startFirstRoom(run: RunState): RunState {
 export function applyCombatAction(run: RunState, action: CombatAction): RunState {
   if (!run.combat || run.phase !== 'combat') return run;
   const nextCombat = combatApplyAction(run.combat, action, run.rng);
-  return { ...run, combat: nextCombat, playerHP: nextCombat.playerHP, potions: nextCombat.potions };
+  return { ...run, combat: nextCombat, playerHP: nextCombat.playerHP, potions: nextCombat.potions, currency: nextCombat.currency };
 }
 
 /**
@@ -151,7 +153,15 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
     return { ...base, phase: 'shrine' as const, combat: null, shrineOptions };
   }
 
-  const combat = initCombat(node.room, run.rng, run.playerHP, run.playerHPMax, run.deck, run.relics, run.potions);
+  if (node.room.kind === 'shop') {
+    // Generated live off run.rng, not precomputed -- see types/room.ts's
+    // ShopRoomInstance for why (same relic/potion-cap exclusion reasoning
+    // as a shrine's offer).
+    const shopOptions = generateShopOptions(run.rng, run.relics, run.potions);
+    return { ...base, phase: 'shop' as const, combat: null, shopOptions };
+  }
+
+  const combat = initCombat(node.room, run.rng, run.playerHP, run.playerHPMax, run.deck, run.relics, run.potions, run.currency);
   return { ...base, phase: 'combat' as const, combat };
 }
 
@@ -199,4 +209,36 @@ export function chooseRelic(run: RunState, relicId: string): RunState {
 export function skipShrine(run: RunState): RunState {
   if (run.phase !== 'shrine') return run;
   return finishSideRoom({ ...run, shrineOptions: null });
+}
+
+/**
+ * Buys one shop option (by id): deducts its price from currency and applies
+ * it to deck/relics/potions, the same three-way split chooseReward already
+ * has. Unlike chooseReward, this doesn't leave the phase -- it only removes
+ * the bought option from shopOptions, so the player can keep buying whatever
+ * else they can still afford (see leaveShop for the actual exit). A no-op
+ * (returns run unchanged) if the option doesn't exist or currency can't
+ * cover its price.
+ */
+export function buyShopOption(run: RunState, optionId: string): RunState {
+  if (run.phase !== 'shop' || !run.shopOptions) return run;
+  const chosen = run.shopOptions.find((o) => o.id === optionId);
+  if (!chosen) return run;
+  if (run.currency < chosen.price) return run;
+
+  const currency = run.currency - chosen.price;
+  const shopOptions = run.shopOptions.filter((o) => o.id !== optionId);
+  const withPurchase =
+    chosen.optionType === 'card'
+      ? { deck: [...run.deck, chosen.card] }
+      : chosen.optionType === 'relic'
+        ? { relics: [...run.relics, chosen.relic] }
+        : { potions: [...run.potions, chosen.potion] };
+  return { ...run, ...withPurchase, currency, shopOptions };
+}
+
+/** Leaves the shop, buying nothing further -- the general "I'm done here" exit, same shape as skipShrine/skipReward. */
+export function leaveShop(run: RunState): RunState {
+  if (run.phase !== 'shop') return run;
+  return finishSideRoom({ ...run, shopOptions: null });
 }

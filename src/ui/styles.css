@@ -214,6 +214,11 @@ button {
   font-weight: 500;
 }
 
+.topbar-currency {
+  color: #d4ac0d;
+  font-weight: 500;
+}
+
 /* --- Combat layout --- */
 
 /* Every section heading on the battle screen (Enemies, You, Table, Your
@@ -709,6 +714,60 @@ button {
 }
 
 .shrine-pass-button {
+  margin-top: 1.5rem;
+}
+
+/* --- Shop --- */
+
+.shop-screen {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.shop-currency {
+  color: #d4ac0d;
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.shop-choices {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.shop-choice {
+  min-width: 160px;
+  max-width: 220px;
+  background: #1c1c26;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.shop-choice h3 {
+  margin-top: 0;
+}
+
+.shop-choice--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shop-price {
+  color: #d4ac0d;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+
+.shop-empty {
+  color: #999;
+}
+
+.shop-leave-button {
   margin-top: 1.5rem;
 }
 

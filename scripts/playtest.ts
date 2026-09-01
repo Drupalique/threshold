@@ -8,7 +8,7 @@
 // Usage: npx tsx scripts/playtest.ts <command> [args...]
 // Run `npx tsx scripts/playtest.ts help` for the command list.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, restHeal, restRemoveCard, chooseRelic, skipShrine, chooseDoor } from '../src/engine/runEngine.ts';
+import { createNewRun, startFirstRoom, applyCombatAction, resolveCombatEnd, chooseReward, skipReward, restHeal, restRemoveCard, chooseRelic, skipShrine, buyShopOption, leaveShop, chooseDoor } from '../src/engine/runEngine.ts';
 import { createRngFromState } from '../src/engine/rng.ts';
 import { getLegalPlaySets, getLegalFreeClaimUses, getLegalSaltUses, requiresEnemyTarget } from '../src/engine/combatEngine.ts';
 import { SUIT_DEFINITIONS, REST_HEAL_PCT, QUAKE_BONUS_PLAYS } from '../src/config/constants.ts';
@@ -97,7 +97,7 @@ function tableSummary(table: TableCard[]): string[] {
 function render(run: RunState, lastLogLength: number) {
   const lines: string[] = [];
   lines.push(`=== seed=${run.seed} depth=${run.depth}/${run.maxDepth} phase=${run.phase} ===`);
-  lines.push(`Player HP: ${run.playerHP}/${run.playerHPMax}`);
+  lines.push(`Player HP: ${run.playerHP}/${run.playerHPMax}  Currency: ${run.currency}`);
   if (run.relics.length > 0) lines.push(`Relics: ${run.relics.map((r) => r.name).join(', ')}`);
   if (run.potions.length > 0) lines.push(`Potions: ${run.potions.map((p) => p.name).join(', ')}`);
 
@@ -196,6 +196,22 @@ function render(run: RunState, lastLogLength: number) {
     lines.push('A shrine offers a relic (exclusive -- pick one, or shrine-pass):');
     run.shrineOptions.forEach((relic, i) => {
       lines.push(`  [${i}] [${relic.id}] ${relic.name}: ${relic.description}`);
+    });
+  }
+
+  if (run.phase === 'shop' && run.shopOptions) {
+    lines.push('');
+    lines.push(`A shop (currency ${run.currency}) -- buy any number, then shop-leave:`);
+    run.shopOptions.forEach((opt, i) => {
+      const desc =
+        opt.optionType === 'relic'
+          ? `RELIC -- ${opt.relic.name}: ${opt.relic.description}`
+          : opt.optionType === 'potion'
+            ? `POTION -- ${opt.potion.name}: ${opt.potion.description}`
+            : opt.card.kind === 'quake'
+              ? `QUAKE -- +${QUAKE_BONUS_PLAYS} plays for a turn`
+              : `${opt.card.suit} (${suitCategory(opt.card.suit)})`;
+      lines.push(`  [${i}] [${opt.id}] price ${opt.price} -- ${desc}`);
     });
   }
 
@@ -415,6 +431,45 @@ switch (cmd) {
     break;
   }
 
+  case 'shop': {
+    const [indexRaw] = args;
+    if (!indexRaw) {
+      console.log('Usage: shop <optionIndex>');
+      process.exit(1);
+    }
+    const { run } = load();
+    if (run.phase !== 'shop' || !run.shopOptions) {
+      console.log('Not currently at a shop.');
+      process.exit(1);
+    }
+    const index = Number(indexRaw);
+    const chosen = run.shopOptions[index];
+    if (!chosen) {
+      console.log(`No shop option at index ${indexRaw}.`);
+      process.exit(1);
+    }
+    const next = buyShopOption(run, chosen.id);
+    if (next === run) {
+      console.log(`Can't afford [${chosen.id}] (price ${chosen.price}, have ${run.currency}).`);
+      process.exit(1);
+    }
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
+  case 'shop-leave': {
+    const { run } = load();
+    if (run.phase !== 'shop') {
+      console.log('Not currently at a shop.');
+      process.exit(1);
+    }
+    const next = leaveShop(run);
+    save(next, newLogLength(next));
+    render(next, 0);
+    break;
+  }
+
   case 'door': {
     const [doorId] = args;
     if (!doorId) {
@@ -446,6 +501,8 @@ Commands:
   rest-remove <cardId>                    at a rest room, permanently remove a card instead of resting
   shrine <relicIndex>                     at a shrine, take one of the offered relics
   shrine-pass                             at a shrine, leave without taking a relic
+  shop <optionIndex>                      at a shop, buy one offered option (repeatable while affordable)
+  shop-leave                              at a shop, leave (buying nothing further)
   door <doorId>                           pick a door after clearing a room
   help                                    this message
 

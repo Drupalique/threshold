@@ -10,10 +10,16 @@ import {
   restRemoveCard,
   chooseRelic,
   skipShrine,
+  buyShopOption,
+  leaveShop,
 } from '../runEngine';
+import { generateShopOptions } from '../rewardGenerator';
+import { createRng } from '../rng';
 import type { RunState } from '../../types/run';
-import type { RestRoomInstance, ShrineRoomInstance } from '../../types/room';
+import type { RestRoomInstance, ShrineRoomInstance, ShopRoomInstance } from '../../types/room';
 import { potionById } from '../../config/potions';
+import { RELIC_DEFS } from '../../config/relics';
+import { POTION_INVENTORY_CAP, SHOP_CARD_PRICE, SHOP_RELIC_PRICE, SHOP_POTION_PRICE } from '../../config/constants';
 
 function clearCurrentRoom(run: RunState): RunState {
   return { ...run, combat: { ...run.combat!, enemies: [], status: 'room-cleared' } };
@@ -80,6 +86,40 @@ function enterShrineRoom(run: RunState): RunState {
           path: childPath,
           floor: run.depth + 2,
           room: shrineRoom,
+          doors: [
+            { tags: { size: 'small', color: 'red' }, childPath: `${childPath}0` },
+            { tags: { size: 'large', color: 'blue' }, childPath: `${childPath}1` },
+          ],
+        },
+      },
+    },
+    currentDoors: [{ id: doorId, tags: { size: 'small', color: 'red' }, childPath }],
+  };
+  return chooseDoor(withDoor, doorId);
+}
+
+/**
+ * Forces the run into the 'shop' phase deterministically, bypassing
+ * runTree's RNG-dependent SHOP_ROOM_RATIO roll -- same synthetic-node trick
+ * enterRestRoom/enterShrineRoom use. Since shop content is generated live
+ * (not precomputed in the tree, see types/room.ts's ShopRoomInstance), this
+ * exercises chooseDoor's own generateShopOptions call, not a canned list.
+ */
+function enterShopRoom(run: RunState): RunState {
+  const shopRoom: ShopRoomInstance = { kind: 'shop', id: 'test-shop-room' };
+  const childPath = 'test-shop-room';
+  const doorId = 'door-test-shop-room';
+  const withDoor: RunState = {
+    ...run,
+    phase: 'door-choice',
+    runTree: {
+      ...run.runTree,
+      nodes: {
+        ...run.runTree.nodes,
+        [childPath]: {
+          path: childPath,
+          floor: run.depth + 2,
+          room: shopRoom,
           doors: [
             { tags: { size: 'small', color: 'red' }, childPath: `${childPath}0` },
             { tags: { size: 'large', color: 'blue' }, childPath: `${childPath}1` },
@@ -341,5 +381,111 @@ describe('shrine rooms', () => {
     const run = createNewRun(3);
     expect(chooseRelic(run, 'anything')).toBe(run);
     expect(skipShrine(run)).toBe(run);
+  });
+});
+
+describe('shop rooms', () => {
+  it('choosing a door into a shop sets phase to shop with generated (non-empty) options and no combat state', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+
+    expect(run.phase).toBe('shop');
+    expect(run.combat).toBeNull();
+    expect(run.shopOptions).not.toBeNull();
+    expect(run.shopOptions!.length).toBeGreaterThan(0);
+  });
+
+  it('buyShopOption deducts the price, applies a card option to the deck, removes the bought slot, and stays in the shop phase', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    const cardOption = {
+      id: 'test-card',
+      optionType: 'card' as const,
+      price: SHOP_CARD_PRICE,
+      card: { id: 'test-card-card', kind: 'creature' as const, suit: 'wolf' as const },
+    };
+    run = { ...run, currency: 50, shopOptions: [cardOption] };
+    const deckSizeBefore = run.deck.length;
+
+    run = buyShopOption(run, cardOption.id);
+
+    expect(run.currency).toBe(50 - SHOP_CARD_PRICE);
+    expect(run.deck.length).toBe(deckSizeBefore + 1);
+    expect(run.deck.some((c) => c.id === cardOption.card.id)).toBe(true);
+    expect(run.shopOptions).toEqual([]);
+    expect(run.phase).toBe('shop');
+  });
+
+  it('buyShopOption applies a relic option to held relics and a potion option to held potions', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    const relicOption = { id: 'test-relic', optionType: 'relic' as const, price: SHOP_RELIC_PRICE, relic: RELIC_DEFS[0] };
+    const potionOption = { id: 'test-potion', optionType: 'potion' as const, price: SHOP_POTION_PRICE, potion: potionById('salt') };
+    run = { ...run, currency: 100, shopOptions: [relicOption, potionOption] };
+
+    run = buyShopOption(run, relicOption.id);
+    expect(run.relics).toEqual([RELIC_DEFS[0]]);
+    expect(run.currency).toBe(100 - SHOP_RELIC_PRICE);
+
+    run = buyShopOption(run, potionOption.id);
+    expect(run.potions).toEqual([potionById('salt')]);
+    expect(run.currency).toBe(100 - SHOP_RELIC_PRICE - SHOP_POTION_PRICE);
+    expect(run.shopOptions).toEqual([]);
+  });
+
+  it('buying an option that costs more than held currency is a no-op', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    const cardOption = {
+      id: 'test-card',
+      optionType: 'card' as const,
+      price: SHOP_CARD_PRICE,
+      card: { id: 'test-card-card', kind: 'creature' as const, suit: 'wolf' as const },
+    };
+    run = { ...run, currency: SHOP_CARD_PRICE - 1, shopOptions: [cardOption] };
+
+    const rejected = buyShopOption(run, cardOption.id);
+    expect(rejected).toBe(run);
+  });
+
+  it('buying an id that was not offered is a no-op', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+
+    const rejected = buyShopOption(run, 'not-a-real-option');
+    expect(rejected).toBe(run);
+  });
+
+  it('leaveShop clears the offer and proceeds to door-choice', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    const depthBefore = run.depth;
+
+    run = leaveShop(run);
+
+    expect(run.shopOptions).toBeNull();
+    expect(run.phase).toBe('door-choice');
+    expect(run.depth).toBe(depthBefore + 1);
+  });
+
+  it('buyShopOption and leaveShop are both no-ops outside the shop phase', () => {
+    const run = createNewRun(3);
+    expect(buyShopOption(run, 'anything')).toBe(run);
+    expect(leaveShop(run)).toBe(run);
+  });
+
+  it('never offers a relic the player already holds, and stops offering potions once the inventory cap is reached', () => {
+    const options = generateShopOptions(createRng(42), RELIC_DEFS, []);
+    expect(options.some((o) => o.optionType === 'relic')).toBe(false);
+
+    const cappedPotions = Array.from({ length: POTION_INVENTORY_CAP }, () => potionById('salt'));
+    const cappedOptions = generateShopOptions(createRng(42), [], cappedPotions);
+    expect(cappedOptions.some((o) => o.optionType === 'potion')).toBe(false);
   });
 });

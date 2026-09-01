@@ -3,13 +3,14 @@ import type { PoolSizeBand, RoomInstance } from '../types/room';
 import type { RunTree, RunTreeNode, TreeDoorRef } from '../types/runTree';
 import type { Rng } from './rng';
 import { createNodeRng } from './rng';
-import { generateRoom, generateRestRoom, generateShrineRoom } from './roomGenerator';
+import { generateRoom, generateRestRoom, generateShrineRoom, generateShopRoom } from './roomGenerator';
 import { uniformPick, weightedPick } from './weightedPick';
 import {
   SUIT_COLOR_FAMILY,
   DOOR_CORRELATION_RATE,
   REST_ROOM_RATIO,
   SHRINE_ROOM_RATIO,
+  SHOP_ROOM_RATIO,
   RUN_MAX_DEPTH,
 } from '../config/constants';
 
@@ -29,7 +30,7 @@ function flipColor(color: DoorColor): DoorColor {
  * screen is a possible follow-up, not implemented here.
  */
 function trueTagsForRoom(room: RoomInstance, rng: Rng): DoorTags {
-  if (room.kind === 'rest' || room.kind === 'shrine') {
+  if (room.kind === 'rest' || room.kind === 'shrine' || room.kind === 'shop') {
     return { size: uniformPick(rng, ['small', 'large']), color: uniformPick(rng, ['red', 'blue']) };
   }
   return {
@@ -66,13 +67,14 @@ export function buildRunTree(seed: number, maxDepth: number = RUN_MAX_DEPTH): Ru
       // The elite floor (childFloor >= RUN_MAX_DEPTH) is always the
       // guaranteed solo boss fight -- never a rest/shrine room, so the roll
       // is skipped entirely once childFloor reaches the run's last room.
-      type RoomKind = 'rest' | 'shrine' | 'combat';
+      type RoomKind = 'rest' | 'shrine' | 'shop' | 'combat';
       const roomKind: RoomKind =
         childFloor < maxDepth
           ? weightedPick<RoomKind>(nodeRng, [
               { weight: REST_ROOM_RATIO, value: 'rest' },
               { weight: SHRINE_ROOM_RATIO, value: 'shrine' },
-              { weight: 1 - REST_ROOM_RATIO - SHRINE_ROOM_RATIO, value: 'combat' },
+              { weight: SHOP_ROOM_RATIO, value: 'shop' },
+              { weight: 1 - REST_ROOM_RATIO - SHRINE_ROOM_RATIO - SHOP_ROOM_RATIO, value: 'combat' },
             ])
           : 'combat';
       const room: RoomInstance =
@@ -80,7 +82,9 @@ export function buildRunTree(seed: number, maxDepth: number = RUN_MAX_DEPTH): Ru
           ? generateRestRoom(childPath)
           : roomKind === 'shrine'
             ? generateShrineRoom(childPath)
-            : generateRoom(nodeRng, childFloor, childPath);
+            : roomKind === 'shop'
+              ? generateShopRoom(childPath)
+              : generateRoom(nodeRng, childFloor, childPath);
 
       const trueTags = trueTagsForRoom(room, nodeRng);
       const tags: DoorTags = {

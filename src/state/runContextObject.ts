@@ -13,6 +13,8 @@ export interface RunContextValue {
   restRemoveCard: (cardId: string) => void;
   chooseRelic: (relicId: string) => void;
   skipShrine: () => void;
+  buyShopOption: (optionId: string) => void;
+  leaveShop: () => void;
   chooseDoor: (doorId: string) => void;
   restart: () => void;
 }

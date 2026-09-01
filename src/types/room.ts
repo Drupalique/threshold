@@ -73,4 +73,18 @@ export interface ShrineRoomInstance {
   id: string;
 }
 
-export type RoomInstance = CombatRoomInstance | RestRoomInstance | ShrineRoomInstance;
+/**
+ * A currency shop stop, resolved by runEngine's buyShopOption/leaveShop
+ * rather than combatEngine.ts -- see doorGenerator.ts/runTree.ts's
+ * SHOP_ROOM_RATIO roll. Like ShrineRoomInstance (and unlike
+ * CombatRoomInstance/RestRoomInstance), its offer isn't precomputed here:
+ * it must exclude relics the player already holds and respect the potion
+ * inventory cap by the time they arrive, so its content is generated live
+ * off run.rng in chooseDoor instead of being fixed by the tree's own seed.
+ */
+export interface ShopRoomInstance {
+  kind: 'shop';
+  id: string;
+}
+
+export type RoomInstance = CombatRoomInstance | RestRoomInstance | ShrineRoomInstance | ShopRoomInstance;

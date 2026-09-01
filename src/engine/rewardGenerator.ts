@@ -1,5 +1,5 @@
 import type { SuitId } from '../types/suits';
-import type { RewardOption } from '../types/run';
+import type { RewardOption, ShopOption } from '../types/run';
 import type { RelicDef } from '../types/relics';
 import type { PotionDef } from '../types/potions';
 import type { Rng } from './rng';
@@ -21,6 +21,10 @@ import {
   POTION_INVENTORY_CAP,
   REWARD_OPTION_COUNT,
   SHRINE_OPTION_COUNT,
+  SHOP_OPTION_COUNT,
+  SHOP_CARD_PRICE,
+  SHOP_RELIC_PRICE,
+  SHOP_POTION_PRICE,
 } from '../config/constants';
 
 // Every suit the reward screen can offer -- unlike a room's pool/hand (which
@@ -96,4 +100,50 @@ export function generateRewardOptions(
  */
 export function generateShrineOptions(rng: Rng, heldRelics: RelicDef[]): RelicDef[] {
   return pickDistinct(rng, unheldRelics(heldRelics), SHRINE_OPTION_COUNT);
+}
+
+/**
+ * A shop's priced offer -- SHOP_OPTION_COUNT slots, drawn from the exact
+ * same category pool/weights generateRewardOptions above uses (suit/special/
+ * Quake/relic/potion, same held-relic/potion-cap exclusion), just stamping a
+ * fixed price per optionType (config/constants.ts's SHOP_CARD_PRICE/
+ * SHOP_RELIC_PRICE/SHOP_POTION_PRICE) instead of the reward screen's
+ * exclusive pick-1 framing -- see runEngine.ts's buyShopOption for how
+ * multiple slots can be bought in one visit. Generated live off run.rng in
+ * chooseDoor, not precomputed in the tree, same reason a shrine's offer
+ * isn't (types/room.ts's ShopRoomInstance).
+ */
+export function generateShopOptions(rng: Rng, heldRelics: RelicDef[], heldPotions: PotionDef[]): ShopOption[] {
+  const offerableRelics = unheldRelics(heldRelics);
+  const potionSlotAvailable = heldPotions.length < POTION_INVENTORY_CAP;
+  const options: ShopOption[] = [];
+  for (let i = 0; i < SHOP_OPTION_COUNT; i++) {
+    const id = `shop-${i}`;
+    const category = weightedPick<RewardCategory>(rng, [
+      {
+        weight:
+          1 - QUAKE_REWARD_RATIO - SPECIAL_REWARD_RATIO - RELIC_REWARD_RATIO - POTION_REWARD_RATIO,
+        value: 'suit',
+      },
+      { weight: SPECIAL_REWARD_RATIO, value: 'special' },
+      { weight: QUAKE_REWARD_RATIO, value: 'quake' },
+      { weight: offerableRelics.length > 0 ? RELIC_REWARD_RATIO : 0, value: 'relic' },
+      { weight: potionSlotAvailable ? POTION_REWARD_RATIO : 0, value: 'potion' },
+    ]);
+    if (category === 'quake') {
+      options.push({ id, optionType: 'card', price: SHOP_CARD_PRICE, card: { id, kind: 'quake' } });
+    } else if (category === 'special') {
+      const def = uniformPick(rng, SPECIAL_CARD_DEFS);
+      options.push({ id, optionType: 'card', price: SHOP_CARD_PRICE, card: { id, kind: 'creature', suit: def.suit, specialId: def.id } });
+    } else if (category === 'relic') {
+      const relic = uniformPick(rng, offerableRelics);
+      options.push({ id, optionType: 'relic', price: SHOP_RELIC_PRICE, relic });
+    } else if (category === 'potion') {
+      const potion = uniformPick(rng, POTION_DEFS);
+      options.push({ id, optionType: 'potion', price: SHOP_POTION_PRICE, potion });
+    } else {
+      options.push({ id, optionType: 'card', price: SHOP_CARD_PRICE, card: { id, kind: 'creature', suit: uniformPick(rng, REWARD_SUITS) } });
+    }
+  }
+  return options;
 }
