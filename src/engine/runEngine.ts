@@ -2,10 +2,13 @@ import type { RunState } from '../types/run';
 import type { Door } from '../types/door';
 import type { CombatRoomInstance } from '../types/room';
 import type { CombatAction } from '../types/combat';
+import type { Card, CreatureCard } from '../types/cards';
 import { createRng } from './rng';
 import { buildRunTree } from './runTree';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
-import { generateRewardOptions, generateShrineOptions, generateShopOptions } from './rewardGenerator';
+import { generateRewardOptions, generateShrineOptions, generateShopOptions, REWARD_SUITS } from './rewardGenerator';
+import { uniformPick } from './weightedPick';
+import { specialCardsBySuit } from '../config/specialCards';
 import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
 
 export function createNewRun(seed: number): RunState {
@@ -26,6 +29,7 @@ export function createNewRun(seed: number): RunState {
     rewardOptions: null,
     shrineOptions: null,
     shopOptions: null,
+    pendingDeckAction: null,
     currentDoors: null,
     combat: null,
   };
@@ -74,7 +78,11 @@ export function resolveCombatEnd(run: RunState): RunState {
     return { ...run, depth: newDepth, phase: 'run-complete' };
   }
 
-  const rewardOptions = generateRewardOptions(newDepth, run.rng, run.relics, run.potions);
+  // The just-cleared room's own threatSuits (still readable off run.combat
+  // here, before it's cleared below) bias the reward's suit-slot odds --
+  // MECHANIC_BRAINSTORM.md's "Reward weighting toward the cleared room's
+  // threat suits".
+  const rewardOptions = generateRewardOptions(newDepth, run.rng, run.relics, run.potions, run.combat.roomParams.threatSuits);
   return { ...run, depth: newDepth, phase: 'reward', rewardOptions };
 }
 
@@ -157,7 +165,7 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
     // Generated live off run.rng, not precomputed -- see types/room.ts's
     // ShopRoomInstance for why (same relic/potion-cap exclusion reasoning
     // as a shrine's offer).
-    const shopOptions = generateShopOptions(run.rng, run.relics, run.potions);
+    const shopOptions = generateShopOptions(run.rng, run.relics, run.potions, run.deck);
     return { ...base, phase: 'shop' as const, combat: null, shopOptions };
   }
 
@@ -214,11 +222,14 @@ export function skipShrine(run: RunState): RunState {
 /**
  * Buys one shop option (by id): deducts its price from currency and applies
  * it to deck/relics/potions, the same three-way split chooseReward already
- * has. Unlike chooseReward, this doesn't leave the phase -- it only removes
- * the bought option from shopOptions, so the player can keep buying whatever
- * else they can still afford (see leaveShop for the actual exit). A no-op
- * (returns run unchanged) if the option doesn't exist or currency can't
- * cover its price.
+ * has -- except a 'deck-action' purchase (Transform/Duplicate/Upgrade)
+ * doesn't touch any of those itself, it sets `pendingDeckAction` so the shop
+ * screen can prompt for which deck card to apply it to (see
+ * resolveDeckAction below). Unlike chooseReward, this doesn't leave the
+ * phase -- it only removes the bought option from shopOptions, so the
+ * player can keep buying whatever else they can still afford (see leaveShop
+ * for the actual exit). A no-op (returns run unchanged) if the option
+ * doesn't exist or currency can't cover its price.
  */
 export function buyShopOption(run: RunState, optionId: string): RunState {
   if (run.phase !== 'shop' || !run.shopOptions) return run;
@@ -228,6 +239,9 @@ export function buyShopOption(run: RunState, optionId: string): RunState {
 
   const currency = run.currency - chosen.price;
   const shopOptions = run.shopOptions.filter((o) => o.id !== optionId);
+  if (chosen.optionType === 'deck-action') {
+    return { ...run, currency, shopOptions, pendingDeckAction: { action: chosen.action } };
+  }
   const withPurchase =
     chosen.optionType === 'card'
       ? { deck: [...run.deck, chosen.card] }
@@ -235,6 +249,44 @@ export function buyShopOption(run: RunState, optionId: string): RunState {
         ? { relics: [...run.relics, chosen.relic] }
         : { potions: [...run.potions, chosen.potion] };
   return { ...run, ...withPurchase, currency, shopOptions };
+}
+
+let deckActionDupCounter = 0;
+
+/**
+ * Resolves a bought-but-not-yet-applied deck action (see buyShopOption)
+ * against a chosen deck card. A no-op outside the 'shop' phase, without a
+ * pending action, if the card doesn't exist, isn't a creature card (Quake/
+ * Cleave cards carry no suit, so none of these three make sense on them),
+ * or -- for 'upgrade' specifically -- if it already carries a specialId
+ * (only a plain card can be promoted).
+ */
+export function resolveDeckAction(run: RunState, cardId: string): RunState {
+  if (run.phase !== 'shop' || !run.pendingDeckAction) return run;
+  const card = run.deck.find((c) => c.id === cardId);
+  if (!card || card.kind !== 'creature') return run;
+  const { action } = run.pendingDeckAction;
+  if (action === 'upgrade' && card.specialId) return run;
+
+  let deck: Card[];
+  if (action === 'transform') {
+    // Guaranteed-different suit reroll (MECHANIC_BRAINSTORM.md's "Suit
+    // reroll (Transform)") -- a rerolled special becomes a plain card of its
+    // new suit, since its old specialId no longer matches.
+    const otherSuits = REWARD_SUITS.filter((s) => s !== card.suit);
+    const suit = uniformPick(run.rng, otherSuits);
+    deck = run.deck.map((c) => (c.id === cardId ? { ...c, suit, specialId: undefined } : c));
+  } else if (action === 'duplicate') {
+    const copy: CreatureCard = { ...card, id: `${card.id}-dup-${deckActionDupCounter++}` };
+    deck = [...run.deck, copy];
+  } else {
+    // upgrade (Promote) -- exactly one named special per suit today (see
+    // config/specialCards.ts's SPECIAL_CARD_DEFS), so this is deterministic,
+    // no rng draw needed.
+    const special = specialCardsBySuit(card.suit)[0];
+    deck = run.deck.map((c) => (c.id === cardId ? { ...c, specialId: special.id } : c));
+  }
+  return { ...run, deck, pendingDeckAction: null };
 }
 
 /** Leaves the shop, buying nothing further -- the general "I'm done here" exit, same shape as skipShrine/skipReward. */

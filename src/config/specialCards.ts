@@ -16,6 +16,10 @@ import type { CreatureCard } from '../types/cards';
 // independently-authored numbers.
 const RIDER_AMOUNT = 3;
 
+// Splash-rider amount (MECHANIC_BRAINSTORM.md's AOE tier 1) -- deliberately
+// smaller than RIDER_AMOUNT since it hits every alive enemy, not just one.
+const AOE_RIDER_AMOUNT = 2;
+
 export const SPECIAL_CARD_DEFS: SpecialCardDef[] = [
   {
     id: 'alpha-wolf',
@@ -80,6 +84,17 @@ export const SPECIAL_CARD_DEFS: SpecialCardDef[] = [
     description: `Also grants ${RIDER_AMOUNT} Guard.`,
     rider: { kind: 'bonus-guard', amount: RIDER_AMOUNT },
   },
+  // A second Ember special (MECHANIC_BRAINSTORM.md's AOE tier 1, "splash
+  // rider") -- specialCardsBySuit already returns an array per suit, so a
+  // suit can carry more than one named special; this one is reward/shop-
+  // pool only (not in STARTER_DECK, unlike every suit's first special).
+  {
+    id: 'cinder-storm',
+    suit: 'ember',
+    name: 'Cinder Storm',
+    description: `Also deals ${AOE_RIDER_AMOUNT} damage to every alive enemy.`,
+    rider: { kind: 'bonus-damage-aoe', amount: AOE_RIDER_AMOUNT },
+  },
 ];
 
 export function specialCardById(id: string): SpecialCardDef {
@@ -117,7 +132,7 @@ export function riderForCard(card: Pick<CreatureCard, 'specialId'>, category: Su
 }
 
 export function riderDescription(rider: RiderEffect): string {
-  return rider.kind === 'bonus-damage'
-    ? `Also deals ${rider.amount} damage to the target.`
-    : `Also grants ${rider.amount} Guard.`;
+  if (rider.kind === 'bonus-damage') return `Also deals ${rider.amount} damage to the target.`;
+  if (rider.kind === 'bonus-damage-aoe') return `Also deals ${rider.amount} damage to every alive enemy.`;
+  return `Also grants ${rider.amount} Guard.`;
 }

@@ -10,6 +10,10 @@ const STATUS_ICON: Record<StatusId, string> = {
   weaken: '☠',
   poison: '\u{2623}',
   strength: '\u{1F4AA}',
+  vulnerable: '\u{1F494}',
+  regen: '\u{1F49A}',
+  haste: '\u{1F4A8}',
+  slow: '\u{1F40C}',
 };
 
 /** Small "Weaken 2" / "Poison 3" style badges for whatever stacks a holder (an enemy, or the player) currently carries. */

@@ -12,11 +12,17 @@ import type { SuitId } from './suits';
  * actor, the player for an enemy actor) and is only ever paired with suits
  * that already resolve against a target (threat/weaken/poison). bonus-guard
  * always affects whoever played the card, and is the only rider used on
- * self-targeting suits (boon/guard/strength).
+ * self-targeting suits (boon/guard/strength). bonus-damage-aoe
+ * (MECHANIC_BRAINSTORM.md's AOE tier 1, "splash") is bonus-damage's
+ * multi-target sibling -- same threat-only pairing, but a player actor's
+ * bonus lands on every alive enemy instead of the one chosen target (an
+ * enemy actor, with only one possible target, just treats it as ordinary
+ * bonus-damage -- see combatEngine's applyRiders).
  */
 export type RiderEffect =
   | { kind: 'bonus-damage'; amount: number }
-  | { kind: 'bonus-guard'; amount: number };
+  | { kind: 'bonus-guard'; amount: number }
+  | { kind: 'bonus-damage-aoe'; amount: number };
 
 export interface SpecialCardDef {
   id: string;

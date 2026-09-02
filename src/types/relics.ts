@@ -16,6 +16,12 @@ import type { StatusId } from './status';
  *   own category already targets (an enemy for threat/weaken/poison, self
  *   for boon/guard/strength) -- same target split riders' bonus-damage/
  *   bonus-guard split already encodes.
+ * - `guard-strip` (MECHANIC_BRAINSTORM.md's "Sunder") is an instant, one-time
+ *   Guard removal from whoever the play's category resolves against (the
+ *   same target rider-bonus's bonus-damage uses) -- capped at the target's
+ *   current Guard, never a StatusBag stack: Guard itself never decays on its
+ *   own, so a decaying debuff felt like the wrong shape for a one-time
+ *   strip.
  */
 export type RelicEffect =
   | {
@@ -24,7 +30,12 @@ export type RelicEffect =
       riderKind: 'bonus-damage' | 'bonus-guard';
       amount: number;
     }
-  | { kind: 'status-on-claim'; suit: SuitId; statusId: StatusId; amount: number };
+  | { kind: 'status-on-claim'; suit: SuitId; statusId: StatusId; amount: number }
+  | {
+      kind: 'guard-strip';
+      scope: { by: 'suit'; suit: SuitId } | { by: 'category'; category: SuitCategory };
+      amount: number;
+    };
 
 export interface RelicDef {
   id: string;

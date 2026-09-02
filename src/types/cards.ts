@@ -27,7 +27,17 @@ export interface QuakeCard {
   kind: 'quake';
 }
 
-export type Card = CreatureCard | QuakeCard;
+// The Cleave setup card (MECHANIC_BRAINSTORM.md's AOE tier 2): playing it
+// doesn't resolve a set itself, it just flags the next threat play this
+// turn to resolve against every alive enemy (see combatEngine's
+// PLAYER_PLAY_CLEAVE / cleaveActive). Suitless and never enters the pool,
+// same reasoning as QuakeCard above.
+export interface CleaveCard {
+  id: string;
+  kind: 'cleave';
+}
+
+export type Card = CreatureCard | QuakeCard | CleaveCard;
 
 // The pool never contains Quake cards (see QuakeCard's doc comment) but its
 // type is still the shared Card union, so every pool-suit lookup needs this

@@ -185,6 +185,12 @@ export const ENEMY_LOW_HP_HEAL_GUARD_THRESHOLD_PCT = 0.4;
 // lands a pile of stacks just makes Weaken last longer, never hit harder.
 export const WEAKEN_PCT = 0.25;
 
+// Vulnerable's mirror of WEAKEN_PCT -- same flat, stack-count-is-duration-
+// only shape, just inflating incoming threat damage on the holder instead of
+// cutting the dealer's outgoing damage. Matched to WEAKEN_PCT's magnitude
+// since the two are explicitly designed as mirrors of each other.
+export const VULNERABLE_PCT = 0.25;
+
 // --- Doors ------------------------------------------------------------
 
 export const DOOR_CORRELATION_RATE = 0.75;
@@ -301,7 +307,22 @@ export const POTION_REWARD_RATIO = 0.1;
 // relics) can duplicate. First-cut number, not balance-tested.
 export const POTION_INVENTORY_CAP = 4;
 
+// Odds a reward offer's slot is a Cleave card (MECHANIC_BRAINSTORM.md's AOE
+// tier 2) instead of an ordinary suited one -- same tier as
+// QUAKE_REWARD_RATIO, since both are one-off setup cards rather than a
+// permanent per-suit boost.
+export const CLEAVE_REWARD_RATIO = 0.08;
+
 export const REWARD_OPTION_COUNT = 3;
+
+// Probability mass a reward's suit-slot draws uniformly from the just-
+// cleared room's own threatSuits, instead of uniformly across every
+// REWARD_SUITS suit -- the fix for GAME_DESIGN.md's flagged "rewards don't
+// track room difficulty/suits" gap. The remaining (1 - this) mass still
+// draws from the full suit list (which includes the room's threat suits
+// again), so off-suit variety stays possible, just no longer equally
+// likely. First-cut number, not balance-tested.
+export const REWARD_THREAT_SUIT_BIAS = 0.7;
 
 // --- Currency ------------------------------------------------------------
 // Earned from claim overflow (MECHANIC_BRAINSTORM.md's "Currency from claim
@@ -335,6 +356,23 @@ export const SHOP_OPTION_COUNT = 4;
 export const SHOP_CARD_PRICE = 8;
 export const SHOP_RELIC_PRICE = 20;
 export const SHOP_POTION_PRICE = 10;
+
+// Odds a shop slot is a deck-action (Transform/Duplicate/Upgrade -- see
+// engine/rewardGenerator.ts's generateShopOptions) instead of an ordinary
+// suit/special/Quake/Cleave/relic/potion slot. Shop-only: these act on the
+// player's own deck, so (per MECHANIC_BRAINSTORM.md's discussion of tying
+// Upgrade/Transform/Duplicate's venues together) they're never offered on
+// the reward screen. First-cut number, not balance-tested.
+export const SHOP_DECK_ACTION_RATIO = 0.12;
+
+// Rerolling a card to a different suit costs less than an outright new card
+// (SHOP_CARD_PRICE) since it doesn't grow the deck; duplicating a chosen
+// card costs more since it's targeted deck-building rather than a random
+// add; upgrading a plain card into its suit's named special sits between
+// the two. First-cut numbers, not balance-tested.
+export const SHOP_TRANSFORM_PRICE = 6;
+export const SHOP_DUPLICATE_PRICE = 12;
+export const SHOP_UPGRADE_PRICE = 10;
 
 // --- UI pacing only (not engine) --------------------------------------
 

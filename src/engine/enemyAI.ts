@@ -13,6 +13,10 @@ export interface EnemyPlayChoice {
 
 const LOW_HP_HEAL_GUARD_BOOST = 3.0;
 
+// SuitCategory is 'threat'|'boon'|'guard'|StatusId (see types/suits.ts) --
+// no suit's category is (or is planned to be) vulnerable/regen/haste/slow
+// today, only weaken/poison/strength have a status-suit, but the Record
+// still needs every StatusId covered to typecheck. Unreachable in practice.
 const CATEGORY_WEIGHT: Record<SuitCategory, number> = {
   threat: 2.0,
   weaken: 1.5,
@@ -20,6 +24,10 @@ const CATEGORY_WEIGHT: Record<SuitCategory, number> = {
   guard: 1.2,
   boon: 1.0,
   strength: 0.8,
+  vulnerable: 1.0,
+  regen: 1.0,
+  haste: 1.0,
+  slow: 1.0,
 };
 
 const suitCategory = (suit: SuitId): SuitCategory => SUIT_DEFINITIONS.find((s) => s.id === suit)!.category;

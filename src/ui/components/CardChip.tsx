@@ -42,6 +42,7 @@ export function CardChip({ card, selected, disabled, onClick, showRider = true }
   const classes = [
     'card-chip',
     card.kind === 'quake' ? 'card-chip--quake' : '',
+    card.kind === 'cleave' ? 'card-chip--cleave' : '',
     card.kind === 'creature' && card.specialId ? 'card-chip--special' : '',
     selected ? 'card-chip--selected' : '',
     onClick && !disabled ? 'card-chip--clickable' : '',
@@ -54,6 +55,14 @@ export function CardChip({ card, selected, disabled, onClick, showRider = true }
     return (
       <button type="button" className={classes} onClick={onClick} disabled={disabled || !onClick}>
         Quake
+      </button>
+    );
+  }
+
+  if (card.kind === 'cleave') {
+    return (
+      <button type="button" className={classes} onClick={onClick} disabled={disabled || !onClick}>
+        Cleave
       </button>
     );
   }

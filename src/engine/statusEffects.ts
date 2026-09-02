@@ -22,19 +22,21 @@ export function addStacks(bag: StatusBag, id: StatusId, amount: number): StatusB
  * single enemy's dispatched action) -- never per sub-action, matching the
  * existing per-actor-turn bookkeeping discipline (see combatEngine's
  * endTurn docstring: a status tallied twice in one action would silently
- * expire early). Poison deals its current stack count as damage the
- * instant before it decays; Weaken and Strength have no on-tick effect and
- * simply lose a stack. Every status here decays by exactly 1 stack per
- * holder turn; a stack that reaches 0 is dropped from the bag entirely.
+ * expire early). Poison deals its current stack count as damage, and Regen
+ * heals its current stack count, the instant before each decays; Weaken,
+ * Strength, Vulnerable, Haste, and Slow have no on-tick effect and simply
+ * lose a stack. Every status here decays by exactly 1 stack per holder
+ * turn; a stack that reaches 0 is dropped from the bag entirely.
  */
-export function tickStatuses(bag: StatusBag): { statuses: StatusBag; poisonDamage: number } {
+export function tickStatuses(bag: StatusBag): { statuses: StatusBag; poisonDamage: number; regenHeal: number } {
   const poisonDamage = stacksOf(bag, 'poison');
+  const regenHeal = stacksOf(bag, 'regen');
   const statuses: StatusBag = {};
   for (const id of Object.keys(bag) as StatusId[]) {
     const remaining = (bag[id] ?? 0) - 1;
     if (remaining > 0) statuses[id] = remaining;
   }
-  return { statuses, poisonDamage };
+  return { statuses, poisonDamage, regenHeal };
 }
 
 /** Strength adds flat bonus damage per Strength stack to an outgoing attack's base, before any hand-card multiplier. */
@@ -52,4 +54,18 @@ export function withWeaken(magnitude: number, statuses: StatusBag, pct: number):
   const stacks = stacksOf(statuses, 'weaken');
   if (stacks === 0) return magnitude;
   return Math.max(0, Math.round(magnitude * (1 - pct)));
+}
+
+/**
+ * Vulnerable's mirror of withWeaken: inflates a magnitude by a flat
+ * percentage while the entity RECEIVING it holds any Vulnerable stacks --
+ * unlike Weaken (checked against the dealer's own statuses), Vulnerable is
+ * checked against the target's. Same stack-is-duration-only shape: 1 stack
+ * and 10 stacks bump the same amount, the count only gates how many of the
+ * target's own turns it survives.
+ */
+export function withVulnerable(magnitude: number, targetStatuses: StatusBag, pct: number): number {
+  const stacks = stacksOf(targetStatuses, 'vulnerable');
+  if (stacks === 0) return magnitude;
+  return Math.round(magnitude * (1 + pct));
 }

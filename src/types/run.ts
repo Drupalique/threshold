@@ -25,14 +25,22 @@ export type RewardOption =
   | { id: string; optionType: 'relic'; relic: RelicDef }
   | { id: string; optionType: 'potion'; potion: PotionDef };
 
-// A shop-screen slot -- same three-way shape as RewardOption, plus a fixed
-// price (see config/constants.ts's SHOP_CARD_PRICE/SHOP_RELIC_PRICE/
-// SHOP_POTION_PRICE). Unlike a reward, several of these can be bought in one
-// shop visit -- see runEngine.ts's buyShopOption.
+// The 3 shop-only deck actions (MECHANIC_BRAINSTORM.md's Card Upgrade/Suit
+// Reroll/Duplicate) -- buying one doesn't apply anything itself, it sets
+// RunState.pendingDeckAction so the shop screen can prompt for which deck
+// card to act on (see runEngine.ts's resolveDeckAction).
+export type DeckActionKind = 'transform' | 'duplicate' | 'upgrade';
+
+// A shop-screen slot -- same shape as RewardOption, plus a fixed price (see
+// config/constants.ts's SHOP_CARD_PRICE/SHOP_RELIC_PRICE/SHOP_POTION_PRICE/
+// SHOP_TRANSFORM_PRICE/SHOP_DUPLICATE_PRICE/SHOP_UPGRADE_PRICE). Unlike a
+// reward, several of these can be bought in one shop visit -- see
+// runEngine.ts's buyShopOption.
 export type ShopOption =
   | { id: string; optionType: 'card'; price: number; card: Card }
   | { id: string; optionType: 'relic'; price: number; relic: RelicDef }
-  | { id: string; optionType: 'potion'; price: number; potion: PotionDef };
+  | { id: string; optionType: 'potion'; price: number; potion: PotionDef }
+  | { id: string; optionType: 'deck-action'; price: number; action: DeckActionKind };
 
 export interface RunState {
   seed: number;
@@ -77,6 +85,12 @@ export interface RunState {
   // Set by chooseDoor's shop branch, shrunk as options are bought
   // (buyShopOption), cleared by leaveShop. Null outside the 'shop' phase.
   shopOptions: ShopOption[] | null;
+  // Set by buyShopOption when a 'deck-action' slot is bought -- the shop
+  // screen then prompts for which deck card to apply it to instead of
+  // showing the ordinary options grid; resolveDeckAction clears it back to
+  // null once a card is chosen. Null whenever no deck-action purchase is
+  // awaiting a target card.
+  pendingDeckAction: { action: DeckActionKind } | null;
   // The entire run's precomputed branching structure (see types/runTree.ts,
   // engine/runTree.ts's buildRunTree) -- built once from the seed at
   // createNewRun and held for the run's whole lifetime, not just the path

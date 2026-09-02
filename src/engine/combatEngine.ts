@@ -17,11 +17,12 @@ import { countTableSetSize, wipeOwnerTable, claimRoomCards, dealRoomTableForRoun
 import { chooseEnemyPlay } from './enemyAI';
 import { enemyDefById } from '../config/enemies';
 import { specialCardById, riderForCard } from '../config/specialCards';
-import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken } from './statusEffects';
+import { addStacks, stacksOf, tickStatuses, withStrength, withWeaken, withVulnerable } from './statusEffects';
 import { STATUS_DEFS } from '../types/status';
 import {
   SUIT_DEFINITIONS,
   WEAKEN_PCT,
+  VULNERABLE_PCT,
   PLAYS_PER_TURN_BASE,
   ENEMY_PLAYS_PER_TURN,
   QUAKE_BONUS_PLAYS,
@@ -131,6 +132,7 @@ export function initCombat(
     turnNumber: 1,
     activeTurn: 'player',
     playsRemaining: PLAYS_PER_TURN_BASE,
+    cleaveActive: false,
     log: [makeLog(0, 'system', 'round-start', `Threat looms: ${enemyList}. The room deals its neutral hand onto the table.`, snapshot)],
     status: 'active',
     relics,
@@ -251,29 +253,49 @@ export function getLegalSaltUses(state: CombatState): LegalPotionUse[] {
 export interface PlayPreview {
   category: SuitCategory;
   tableCountAfterPlay: number;
-  /** This play's own category effect (damage/heal/Guard/stacks), Strength/Weaken already folded in for a threat play -- exactly what performPlay would apply, never a separate estimate. */
+  /** This play's own category effect (damage/heal/Guard/stacks), Strength/Weaken/Vulnerable already folded in for a threat play -- exactly what performPlay would apply, never a separate estimate. */
   magnitude: number;
   strengthStacks: number;
   weakenStacks: number;
-  /** Combined rider bonus from every selected card (see applyRiders) -- flat, never touched by Strength/Weaken, added on top of `magnitude` once the play actually resolves. */
+  vulnerableStacks: number;
+  /** Combined rider bonus from every selected card (see applyRiders) -- flat, never touched by Strength/Weaken/Vulnerable, added on top of `magnitude` once the play actually resolves. */
   bonusDamage: number;
   bonusGuard: number;
+  bonusDamageAoe: number;
 }
 
-/** Previews exactly what PLAY_SET would compute for these hand cards without mutating state -- built from the same computeMagnitude/computeRiderTotals performPlay itself uses, so a UI preview can never drift from the real resolution. Player-only: enemies don't need a pre-play preview since chooseEnemyPlay commits directly. */
-export function previewPlayerPlay(state: CombatState, suit: SuitId, handCardIds: string[]): PlayPreview {
+/**
+ * Previews exactly what PLAY_SET would compute for these hand cards without
+ * mutating state -- built from the same computeMagnitude/computeRiderTotals
+ * performPlay itself uses, so a UI preview can never drift from the real
+ * resolution. Player-only: enemies don't need a pre-play preview since
+ * chooseEnemyPlay commits directly. `targetInstanceId` is optional (unset
+ * while Cleave is active or no target is chosen yet) -- Vulnerable is
+ * target-specific, so the preview only folds it in once a single target is
+ * actually known; a Cleave-widened play's real per-enemy Vulnerable can
+ * still differ enemy-by-enemy, which the preview doesn't attempt to show.
+ */
+export function previewPlayerPlay(
+  state: CombatState,
+  suit: SuitId,
+  handCardIds: string[],
+  targetInstanceId?: string,
+): PlayPreview {
   const category = suitCategory(suit);
   const tableCountBefore = countTableSetSize(state.table, suit);
-  const { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks } = computeMagnitude(
+  const { tableCountAfterPlay, magnitude: rawMagnitude, strengthStacks, weakenStacks } = computeMagnitude(
     category,
     handCardIds.length,
     tableCountBefore,
     state.playerStatuses,
   );
+  const targetStatuses = targetInstanceId ? state.enemies.find((e) => e.instanceId === targetInstanceId)?.statuses ?? {} : {};
+  const vulnerableStacks = category === 'threat' ? stacksOf(targetStatuses, 'vulnerable') : 0;
+  const magnitude = category === 'threat' ? withVulnerable(rawMagnitude, targetStatuses, VULNERABLE_PCT) : rawMagnitude;
   const idSet = new Set(handCardIds);
   const cards = state.playerHand.filter((c): c is CreatureCard => idSet.has(c.id) && c.kind === 'creature');
-  const { bonusDamage, bonusGuard } = computeRiderTotals(cards);
-  return { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, bonusDamage, bonusGuard };
+  const { bonusDamage, bonusGuard, bonusDamageAoe } = computeRiderTotals(cards);
+  return { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe };
 }
 
 function isLegalPlay(
@@ -293,8 +315,14 @@ function isLegalPlay(
 
   const category = suitCategory(suit);
   if (requiresEnemyTarget(category)) {
-    if (!targetInstanceId) return false;
-    if (!state.enemies.some((e) => e.instanceId === targetInstanceId)) return false;
+    // Cleave (MECHANIC_BRAINSTORM.md's AOE tier 2) flags the next threat
+    // play to resolve against every alive enemy instead of one chosen
+    // target -- no targetInstanceId is needed for that one play.
+    const cleaveWaivesTarget = category === 'threat' && state.cleaveActive;
+    if (!cleaveWaivesTarget) {
+      if (!targetInstanceId) return false;
+      if (!state.enemies.some((e) => e.instanceId === targetInstanceId)) return false;
+    }
   }
   return true;
 }
@@ -364,16 +392,18 @@ function computeMagnitude(
   return { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks };
 }
 
-/** Sums the rider each of `cards` fires (see applyRiders) into the same combined bonus-damage/bonus-guard totals a resolving play would apply -- shared by the real resolver and any preview built ahead of a play. */
-function computeRiderTotals(cards: CreatureCard[]): { bonusDamage: number; bonusGuard: number } {
+/** Sums the rider each of `cards` fires (see applyRiders) into the same combined bonus-damage/bonus-guard/bonus-damage-aoe totals a resolving play would apply -- shared by the real resolver and any preview built ahead of a play. */
+function computeRiderTotals(cards: CreatureCard[]): { bonusDamage: number; bonusGuard: number; bonusDamageAoe: number } {
   let bonusDamage = 0;
   let bonusGuard = 0;
+  let bonusDamageAoe = 0;
   for (const card of cards) {
     const rider = riderForCard(card, suitCategory(card.suit));
     if (rider.kind === 'bonus-damage') bonusDamage += rider.amount;
-    else bonusGuard += rider.amount;
+    else if (rider.kind === 'bonus-guard') bonusGuard += rider.amount;
+    else bonusDamageAoe += rider.amount;
   }
-  return { bonusDamage, bonusGuard };
+  return { bonusDamage, bonusGuard, bonusDamageAoe };
 }
 
 function performPlay(
@@ -432,30 +462,60 @@ function performPlay(
 
   if (category === 'threat') {
     if (actor.kind === 'player') {
-      const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId)!;
-      targetName = enemy.name;
-      const result = absorbDamage(enemy.hp, enemy.guard, magnitude);
-      const dealt = enemy.hp - result.hp;
-      const survives = result.hp > 0;
-      next = {
-        ...next,
-        enemies: survives
-          ? next.enemies.map((e) => (e.instanceId === enemy.instanceId ? { ...e, hp: result.hp, guard: result.guard } : e))
-          : next.enemies.filter((e) => e.instanceId !== enemy.instanceId),
-      };
-      effectDesc =
-        result.absorbed > 0
-          ? `dealing ${magnitude} -- Guard absorbs ${result.absorbed}, ${dealt} gets through`
-          : `dealing ${dealt} to ${enemy.name}`;
-      if (!survives) effectDesc += ` -- ${enemy.name} is defeated!`;
+      if (next.cleaveActive) {
+        // Cleave (MECHANIC_BRAINSTORM.md's AOE tier 2): the setup card
+        // already flagged this as the "next threat play," so the same
+        // computed magnitude lands on every alive enemy, undivided, instead
+        // of the one chosen target -- Vulnerable is still resolved
+        // per-enemy since it's a target-side stat.
+        const results = next.enemies.map((e) => {
+          const dealtMagnitude = withVulnerable(magnitude, e.statuses, VULNERABLE_PCT);
+          const result = absorbDamage(e.hp, e.guard, dealtMagnitude);
+          return { instanceId: e.instanceId, name: e.name, result, dealt: e.hp - result.hp };
+        });
+        next = {
+          ...next,
+          enemies: next.enemies
+            .map((e) => {
+              const r = results.find((x) => x.instanceId === e.instanceId)!;
+              return { ...e, hp: r.result.hp, guard: r.result.guard };
+            })
+            .filter((e) => e.hp > 0),
+          cleaveActive: false,
+        };
+        const totalDealt = results.reduce((sum, r) => sum + r.dealt, 0);
+        const defeated = results.filter((r) => r.result.hp <= 0).map((r) => r.name);
+        targetName = 'every enemy';
+        effectDesc = `dealing ${totalDealt} total across ${results.length} enem${results.length === 1 ? 'y' : 'ies'}`;
+        if (defeated.length > 0) effectDesc += ` -- ${defeated.join(', ')} defeated!`;
+      } else {
+        const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId)!;
+        targetName = enemy.name;
+        const dealtMagnitude = withVulnerable(magnitude, enemy.statuses, VULNERABLE_PCT);
+        const result = absorbDamage(enemy.hp, enemy.guard, dealtMagnitude);
+        const dealt = enemy.hp - result.hp;
+        const survives = result.hp > 0;
+        next = {
+          ...next,
+          enemies: survives
+            ? next.enemies.map((e) => (e.instanceId === enemy.instanceId ? { ...e, hp: result.hp, guard: result.guard } : e))
+            : next.enemies.filter((e) => e.instanceId !== enemy.instanceId),
+        };
+        effectDesc =
+          result.absorbed > 0
+            ? `dealing ${dealtMagnitude} -- Guard absorbs ${result.absorbed}, ${dealt} gets through`
+            : `dealing ${dealt} to ${enemy.name}`;
+        if (!survives) effectDesc += ` -- ${enemy.name} is defeated!`;
+      }
     } else {
       targetName = 'you';
-      const result = absorbDamage(next.playerHP, next.playerGuard, magnitude);
+      const dealtMagnitude = withVulnerable(magnitude, next.playerStatuses, VULNERABLE_PCT);
+      const result = absorbDamage(next.playerHP, next.playerGuard, dealtMagnitude);
       const dealt = next.playerHP - result.hp;
       next = { ...next, playerHP: result.hp, playerGuard: result.guard };
       effectDesc =
         result.absorbed > 0
-          ? `dealing ${magnitude} -- Guard absorbs ${result.absorbed}, ${dealt} gets through`
+          ? `dealing ${dealtMagnitude} -- Guard absorbs ${result.absorbed}, ${dealt} gets through`
           : `dealing ${dealt} to you`;
     }
   } else if (category === 'boon') {
@@ -556,7 +616,7 @@ function applyRiders(
   let next = state;
   const actorName = actorNameOf(state, actor);
 
-  const { bonusDamage, bonusGuard } = computeRiderTotals(playedCards);
+  const { bonusDamage, bonusGuard, bonusDamageAoe } = computeRiderTotals(playedCards);
 
   // Single-card plays keep the flavorful source name (a named special's own
   // name, or the plain suit's name) in the log line; multi-card plays fold
@@ -566,13 +626,18 @@ function applyRiders(
   const sourceLabel = single ? (single.specialId ? specialCardById(single.specialId).name : suitName(single.suit)) : 'Rider effects';
   const plural = !single;
 
-  if (bonusDamage > 0) {
+  // An enemy actor only ever has one possible target (the player), so its
+  // "splash" rider is just ordinary bonus damage -- only a player actor with
+  // more than one alive enemy actually needs the separate AOE branch below.
+  const singleTargetBonusDamage = bonusDamage + (actor.kind === 'enemy' ? bonusDamageAoe : 0);
+
+  if (singleTargetBonusDamage > 0) {
     if (actor.kind === 'player') {
       // The target may already have been defeated by this same play's own
       // category effect -- nothing left to hit.
       const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
       if (enemy) {
-        const result = absorbDamage(enemy.hp, enemy.guard, bonusDamage);
+        const result = absorbDamage(enemy.hp, enemy.guard, singleTargetBonusDamage);
         const dealt = enemy.hp - result.hp;
         const survives = result.hp > 0;
         next = {
@@ -586,12 +651,36 @@ function applyRiders(
         next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', msg, snapshotOf(next))] };
       }
     } else {
-      const result = absorbDamage(next.playerHP, next.playerGuard, bonusDamage);
+      const result = absorbDamage(next.playerHP, next.playerGuard, singleTargetBonusDamage);
       const dealt = next.playerHP - result.hp;
       next = { ...next, playerHP: result.hp, playerGuard: result.guard };
       const msg = `${actorName}'s ${sourceLabel} also ${plural ? 'deal' : 'deals'} ${dealt} damage to you${result.absorbed > 0 ? ` (Guard absorbs ${result.absorbed})` : ''}.`;
       next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', msg, snapshotOf(next))] };
     }
+  }
+
+  if (actor.kind === 'player' && bonusDamageAoe > 0 && next.enemies.length > 0) {
+    // Splash rider (MECHANIC_BRAINSTORM.md's AOE tier 1) -- unlike
+    // bonusDamage above, this always hits every alive enemy, not just the
+    // one chosen target.
+    const results = next.enemies.map((e) => {
+      const result = absorbDamage(e.hp, e.guard, bonusDamageAoe);
+      return { instanceId: e.instanceId, name: e.name, result, dealt: e.hp - result.hp };
+    });
+    next = {
+      ...next,
+      enemies: next.enemies
+        .map((e) => {
+          const r = results.find((x) => x.instanceId === e.instanceId)!;
+          return { ...e, hp: r.result.hp, guard: r.result.guard };
+        })
+        .filter((e) => e.hp > 0),
+    };
+    const totalDealt = results.reduce((sum, r) => sum + r.dealt, 0);
+    const defeated = results.filter((r) => r.result.hp <= 0).map((r) => r.name);
+    let msg = `${sourceLabel} also ${plural ? 'splash' : 'splashes'} ${totalDealt} damage total across ${results.length} enem${results.length === 1 ? 'y' : 'ies'}.`;
+    if (defeated.length > 0) msg += ` ${defeated.join(', ')} defeated!`;
+    next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', msg, snapshotOf(next))] };
   }
 
   if (bonusGuard > 0) {
@@ -681,6 +770,41 @@ function applyRelics(
             log: [...next.log, makeLog(next.turnNumber, 'enemy', 'relic', `${actorName}'s ${relic.name} also raises Guard to ${newGuard}.`, snapshotOf(next))],
           };
         }
+      }
+    } else if (relic.effect.kind === 'guard-strip') {
+      // Sunder (MECHANIC_BRAINSTORM.md's guard-strip): an instant, one-time
+      // Guard removal, capped at the target's current Guard -- reuses
+      // rider-bonus's own bonus-damage target resolution (the opposing side
+      // for whoever played the matching suit/category), but strips Guard
+      // instead of dealing damage. Never decays, never stacks -- there's no
+      // StatusBag entry for it at all.
+      const { scope, amount } = relic.effect;
+      const matches = scope.by === 'suit' ? scope.suit === suit : scope.category === category;
+      if (!matches) continue;
+
+      if (actor.kind === 'player') {
+        const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
+        if (enemy && enemy.guard > 0) {
+          const stripped = Math.min(enemy.guard, amount);
+          next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, guard: e.guard - stripped }));
+          next = {
+            ...next,
+            log: [
+              ...next.log,
+              makeLog(next.turnNumber, 'player', 'relic', `${relic.name} also strips ${stripped} Guard from ${enemy.name}.`, snapshotOf(next)),
+            ],
+          };
+        }
+      } else if (next.playerGuard > 0) {
+        const stripped = Math.min(next.playerGuard, amount);
+        next = { ...next, playerGuard: next.playerGuard - stripped };
+        next = {
+          ...next,
+          log: [
+            ...next.log,
+            makeLog(next.turnNumber, 'enemy', 'relic', `${actorName}'s ${relic.name} also strips ${stripped} Guard from you.`, snapshotOf(next)),
+          ],
+        };
       }
     } else {
       // status-on-claim
@@ -858,7 +982,17 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
   const enemyId = state.enemies[state.activeEnemyIndex].instanceId;
   let next: CombatState = { ...state, table: wipeOwnerTable(state.table, enemyId) };
 
-  for (let i = 0; i < ENEMY_PLAYS_PER_TURN; i++) {
+  // Haste/Slow adjust this enemy's own play allotment for its turn, +1/-1
+  // per stack, floored at 0 -- computed once up front from the statuses it
+  // enters its turn with, same as the player's own playsRemaining reseed
+  // (see endTurn's round-end branch below).
+  const enteringEnemy = next.enemies.find((e) => e.instanceId === enemyId)!;
+  const playAllotment = Math.max(
+    0,
+    ENEMY_PLAYS_PER_TURN + stacksOf(enteringEnemy.statuses, 'haste') - stacksOf(enteringEnemy.statuses, 'slow'),
+  );
+
+  for (let i = 0; i < playAllotment; i++) {
     const currentEnemy = next.enemies.find((e) => e.instanceId === enemyId)!;
     const choice = chooseEnemyPlay(currentEnemy, next.table, rng);
     if (!choice) {
@@ -878,10 +1012,13 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
   // this round (see endTurn's round-end sweep, the one safe place to
   // actually drop it).
   const postPlays = next.enemies.find((e) => e.instanceId === enemyId)!;
-  const { statuses: tickedStatuses, poisonDamage } = tickStatuses(postPlays.statuses);
+  const { statuses: tickedStatuses, poisonDamage, regenHeal } = tickStatuses(postPlays.statuses);
   let tickedHp = postPlays.hp;
   const tickedGuard = postPlays.guard;
   let poisonMessage = '';
+  if (regenHeal > 0) {
+    tickedHp = Math.min(postPlays.hpMax, tickedHp + regenHeal);
+  }
   if (poisonDamage > 0) {
     // Poison ignores Guard entirely -- it lands straight on HP, unlike an
     // ordinary threat/attack hit (see absorbDamage above).
@@ -891,6 +1028,9 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
   }
 
   next = updateEnemy(next, enemyId, (e) => ({ ...e, hp: tickedHp, guard: tickedGuard, statuses: tickedStatuses }));
+  if (regenHeal > 0) {
+    next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'system', 'regen', `${postPlays.name}'s regen heals ${regenHeal}.`, snapshotOf(next))] };
+  }
   if (poisonMessage) {
     next = { ...next, log: [...next.log, makeLog(next.turnNumber, 'system', 'poison', poisonMessage, snapshotOf(next))] };
   }
@@ -977,10 +1117,17 @@ function endTurn(
     // whether or not they were used this turn: a Poison stack deals its
     // damage now, then every stack decays by 1, and the enemy phase begins
     // at index 0.
-    const { statuses: tickedStatuses, poisonDamage } = tickStatuses(next.playerStatuses);
+    const { statuses: tickedStatuses, poisonDamage, regenHeal } = tickStatuses(next.playerStatuses);
     let playerHP = next.playerHP;
     const playerGuard = next.playerGuard;
     let log = next.log;
+    if (regenHeal > 0) {
+      playerHP = Math.min(next.playerHPMax, playerHP + regenHeal);
+      log = [
+        ...log,
+        makeLog(next.turnNumber, 'system', 'regen', `Regen heals ${regenHeal}.`, { playerHP, playerHPMax: next.playerHPMax, playerGuard }),
+      ];
+    }
     if (poisonDamage > 0) {
       // Poison ignores Guard entirely -- it lands straight on HP, unlike an
       // ordinary threat/attack hit (see absorbDamage above).
@@ -1067,7 +1214,12 @@ function endTurn(
     activeTurn: 'player',
     activeEnemyIndex: 0,
     turnNumber: newTurnNumber,
-    playsRemaining: PLAYS_PER_TURN_BASE,
+    // Haste/Slow adjust the base allotment by +1/-1 per stack, floored at 0
+    // -- see resolveEnemyTurn's identical enemy-side reseed above.
+    playsRemaining: Math.max(
+      0,
+      PLAYS_PER_TURN_BASE + stacksOf(next.playerStatuses, 'haste') - stacksOf(next.playerStatuses, 'slow'),
+    ),
   };
 }
 
@@ -1109,6 +1261,32 @@ export function applyCombatAction(state: CombatState, action: CombatAction, rng:
           'player',
           'quake',
           `Player unleashes the Quake card -- +${QUAKE_BONUS_PLAYS} plays this turn (${playsRemaining} now available)!`,
+          snapshotOf(state),
+        ),
+      ],
+    };
+  }
+
+  if (action.type === 'PLAYER_PLAY_CLEAVE') {
+    if (state.activeTurn !== 'player') return state;
+    const card = state.playerHand.find((c) => c.id === action.cardId);
+    if (!card || card.kind !== 'cleave') return state;
+    // A free action, same shape as Quake -- doesn't spend a play, doesn't
+    // end the turn. It flags the next threat play to hit every alive
+    // enemy (see isLegalPlay/performPlay's cleaveActive checks) rather than
+    // granting anything numeric itself.
+    return {
+      ...state,
+      playerHand: state.playerHand.filter((c) => c.id !== action.cardId),
+      discardPile: [...state.discardPile, card],
+      cleaveActive: true,
+      log: [
+        ...state.log,
+        makeLog(
+          state.turnNumber,
+          'player',
+          'cleave',
+          'Player unleashes the Cleave card -- the next threat play this turn hits every alive enemy!',
           snapshotOf(state),
         ),
       ],

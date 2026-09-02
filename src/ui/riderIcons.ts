@@ -7,6 +7,7 @@ import type { RiderEffect } from '../types/specialCards';
 const RIDER_ICON: Record<RiderEffect['kind'], string> = {
   'bonus-damage': '🗡️',
   'bonus-guard': '🛡️',
+  'bonus-damage-aoe': '💥',
 };
 
 export function riderBadgeText(rider: RiderEffect): string {

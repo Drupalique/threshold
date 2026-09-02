@@ -11,6 +11,7 @@ import {
   chooseRelic,
   skipShrine,
   buyShopOption,
+  resolveDeckAction,
   leaveShop,
 } from '../runEngine';
 import { generateShopOptions } from '../rewardGenerator';
@@ -19,7 +20,14 @@ import type { RunState } from '../../types/run';
 import type { RestRoomInstance, ShrineRoomInstance, ShopRoomInstance } from '../../types/room';
 import { potionById } from '../../config/potions';
 import { RELIC_DEFS } from '../../config/relics';
-import { POTION_INVENTORY_CAP, SHOP_CARD_PRICE, SHOP_RELIC_PRICE, SHOP_POTION_PRICE } from '../../config/constants';
+import {
+  POTION_INVENTORY_CAP,
+  SHOP_CARD_PRICE,
+  SHOP_RELIC_PRICE,
+  SHOP_POTION_PRICE,
+  SHOP_TRANSFORM_PRICE,
+  STARTER_DECK,
+} from '../../config/constants';
 
 function clearCurrentRoom(run: RunState): RunState {
   return { ...run, combat: { ...run.combat!, enemies: [], status: 'room-cleared' } };
@@ -481,11 +489,89 @@ describe('shop rooms', () => {
   });
 
   it('never offers a relic the player already holds, and stops offering potions once the inventory cap is reached', () => {
-    const options = generateShopOptions(createRng(42), RELIC_DEFS, []);
+    const options = generateShopOptions(createRng(42), RELIC_DEFS, [], STARTER_DECK);
     expect(options.some((o) => o.optionType === 'relic')).toBe(false);
 
     const cappedPotions = Array.from({ length: POTION_INVENTORY_CAP }, () => potionById('salt'));
-    const cappedOptions = generateShopOptions(createRng(42), [], cappedPotions);
+    const cappedOptions = generateShopOptions(createRng(42), [], cappedPotions, STARTER_DECK);
     expect(cappedOptions.some((o) => o.optionType === 'potion')).toBe(false);
+  });
+
+  it("buying a deck-action option doesn't touch deck/relics/potions -- it sets pendingDeckAction instead", () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    const deckActionOption = { id: 'test-transform', optionType: 'deck-action' as const, price: SHOP_TRANSFORM_PRICE, action: 'transform' as const };
+    run = { ...run, currency: 50, shopOptions: [deckActionOption] };
+    const deckBefore = run.deck;
+
+    run = buyShopOption(run, deckActionOption.id);
+
+    expect(run.currency).toBe(50 - SHOP_TRANSFORM_PRICE);
+    expect(run.deck).toBe(deckBefore); // untouched until resolveDeckAction picks a card
+    expect(run.pendingDeckAction).toEqual({ action: 'transform' });
+    expect(run.shopOptions).toEqual([]);
+  });
+
+  it('resolveDeckAction: transform rerolls the chosen card to a different suit and clears any specialId', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    run = { ...run, pendingDeckAction: { action: 'transform' } };
+    const target = run.deck.find((c) => c.kind === 'creature' && c.specialId)!;
+
+    run = resolveDeckAction(run, target.id);
+
+    const rerolled = run.deck.find((c) => c.id === target.id)!;
+    expect(rerolled.kind).toBe('creature');
+    if (rerolled.kind === 'creature') {
+      expect(rerolled.suit).not.toBe((target as { suit: string }).suit);
+      expect(rerolled.specialId).toBeUndefined();
+    }
+    expect(run.pendingDeckAction).toBeNull();
+  });
+
+  it('resolveDeckAction: duplicate appends a fresh-id copy of the chosen card, leaving the original untouched', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    run = { ...run, pendingDeckAction: { action: 'duplicate' } };
+    const target = run.deck[0];
+    const deckSizeBefore = run.deck.length;
+
+    run = resolveDeckAction(run, target.id);
+
+    expect(run.deck.length).toBe(deckSizeBefore + 1);
+    expect(run.deck.filter((c) => c.kind === 'creature' && c.suit === (target as { suit: string }).suit).length).toBeGreaterThanOrEqual(2);
+    expect(run.deck.some((c) => c.id === target.id)).toBe(true); // original untouched
+    expect(run.pendingDeckAction).toBeNull();
+  });
+
+  it('resolveDeckAction: upgrade promotes a plain card to its suit\'s named special, and is a no-op on an already-special card', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    run = enterShopRoom(run);
+    run = { ...run, pendingDeckAction: { action: 'upgrade' } };
+    const plain = run.deck.find((c) => c.kind === 'creature' && !c.specialId)!;
+
+    const upgraded = resolveDeckAction(run, plain.id);
+    const upgradedCard = upgraded.deck.find((c) => c.id === plain.id)!;
+    expect(upgradedCard.kind).toBe('creature');
+    if (upgradedCard.kind === 'creature') expect(upgradedCard.specialId).toBeDefined();
+    expect(upgraded.pendingDeckAction).toBeNull();
+
+    // Already-special card: no-op, run unchanged.
+    const alreadySpecial = run.deck.find((c) => c.kind === 'creature' && c.specialId)!;
+    const rejected = resolveDeckAction(run, alreadySpecial.id);
+    expect(rejected).toBe(run);
+  });
+
+  it('resolveDeckAction is a no-op outside the shop phase or without a pending action', () => {
+    let run = createNewRun(3);
+    run = startFirstRoom(run);
+    expect(resolveDeckAction(run, run.deck[0].id)).toBe(run);
+
+    run = enterShopRoom(run);
+    expect(resolveDeckAction(run, run.deck[0].id)).toBe(run); // no pendingDeckAction set
   });
 });

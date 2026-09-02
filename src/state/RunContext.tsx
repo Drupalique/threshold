@@ -13,6 +13,7 @@ import {
   chooseRelic,
   skipShrine,
   buyShopOption,
+  resolveDeckAction,
   leaveShop,
   chooseDoor,
 } from '../engine/runEngine';
@@ -29,6 +30,7 @@ type RunReducerAction =
   | { type: 'CHOOSE_RELIC'; relicId: string }
   | { type: 'SKIP_SHRINE' }
   | { type: 'BUY_SHOP_OPTION'; optionId: string }
+  | { type: 'RESOLVE_DECK_ACTION'; cardId: string }
   | { type: 'LEAVE_SHOP' }
   | { type: 'CHOOSE_DOOR'; doorId: string }
   | { type: 'RESTART' };
@@ -59,6 +61,8 @@ function reducer(state: RunState, action: RunReducerAction): RunState {
       return skipShrine(state);
     case 'BUY_SHOP_OPTION':
       return buyShopOption(state, action.optionId);
+    case 'RESOLVE_DECK_ACTION':
+      return resolveDeckAction(state, action.cardId);
     case 'LEAVE_SHOP':
       return leaveShop(state);
     case 'CHOOSE_DOOR':
@@ -85,6 +89,7 @@ export function RunProvider({ children }: { children: ReactNode }) {
     chooseRelic: (relicId) => dispatch({ type: 'CHOOSE_RELIC', relicId }),
     skipShrine: () => dispatch({ type: 'SKIP_SHRINE' }),
     buyShopOption: (optionId) => dispatch({ type: 'BUY_SHOP_OPTION', optionId }),
+    resolveDeckAction: (cardId) => dispatch({ type: 'RESOLVE_DECK_ACTION', cardId }),
     leaveShop: () => dispatch({ type: 'LEAVE_SHOP' }),
     chooseDoor: (doorId) => dispatch({ type: 'CHOOSE_DOOR', doorId }),
     restart: () => dispatch({ type: 'RESTART' }),

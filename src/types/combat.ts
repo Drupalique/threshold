@@ -69,6 +69,11 @@ export interface CombatState {
   // QUAKE_BONUS_PLAYS) or lowered by any future effect -- no separate
   // "unlimited" bypass flag alongside it.
   playsRemaining: number;
+  // Set by PLAYER_PLAY_CLEAVE, cleared the instant the next threat play
+  // resolves (see combatEngine's performPlay) -- flags that one play to hit
+  // every alive enemy instead of a single chosen target (MECHANIC_BRAINSTORM
+  // .md's AOE tier 2).
+  cleaveActive: boolean;
   log: LogEntry[];
   status: CombatStatus;
   // Copied in once from RunState.relics at initCombat -- see
@@ -116,6 +121,11 @@ export interface PlayerPlayQuakeAction {
   cardId: string;
 }
 
+export interface PlayerPlayCleaveAction {
+  type: 'PLAYER_PLAY_CLEAVE';
+  cardId: string;
+}
+
 export interface EnemyTurnAction {
   type: 'ENEMY_TURN';
 }
@@ -141,6 +151,7 @@ export type CombatAction =
   | PlaySetAction
   | PlayerPassAction
   | PlayerPlayQuakeAction
+  | PlayerPlayCleaveAction
   | EnemyTurnAction
   | UseFreeClaimPotionAction
   | UseSaltPotionAction;

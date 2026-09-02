@@ -44,6 +44,40 @@ export const RELIC_DEFS: RelicDef[] = [
     description: 'Grace claims also grant 1 Strength.',
     effect: { kind: 'status-on-claim', suit: 'grace', statusId: 'strength', amount: 1 },
   },
+  // The 4 new statuses (MECHANIC_BRAINSTORM.md's Vulnerable/Regen/Haste/Slow)
+  // ship via this same status-on-claim effect, on suits that don't yet carry
+  // a status relic -- no engine change needed, it's already generic over any
+  // StatusId.
+  {
+    id: 'corroding-grip',
+    name: 'Corroding Grip',
+    description: 'Rot claims also inflict 1 Vulnerable on the target.',
+    effect: { kind: 'status-on-claim', suit: 'rot', statusId: 'vulnerable', amount: 1 },
+  },
+  {
+    id: 'numbing-toxin',
+    name: 'Numbing Toxin',
+    description: 'Venom claims also inflict 1 Slow on the target.',
+    effect: { kind: 'status-on-claim', suit: 'venom', statusId: 'slow', amount: 1 },
+  },
+  {
+    id: 'mending-bulwark',
+    name: 'Mending Bulwark',
+    description: 'Ward claims also grant 1 Regen.',
+    effect: { kind: 'status-on-claim', suit: 'ward', statusId: 'regen', amount: 1 },
+  },
+  {
+    id: 'fleetfoot-charm',
+    name: 'Fleetfoot Charm',
+    description: 'Vigor claims also grant 1 Haste.',
+    effect: { kind: 'status-on-claim', suit: 'vigor', statusId: 'haste', amount: 1 },
+  },
+  {
+    id: 'hexbreakers-edge',
+    name: "Hexbreaker's Edge",
+    description: 'Hex claims also strip 2 Guard from the target.',
+    effect: { kind: 'guard-strip', scope: { by: 'suit', suit: 'hex' }, amount: 2 },
+  },
 ];
 
 export function relicById(id: string): RelicDef {

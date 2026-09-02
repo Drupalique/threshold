@@ -10,11 +10,12 @@ function fisherYates<T>(deck: T[], rng: Rng): T[] {
   return arr;
 }
 
-// A QuakeCard carries no suit, and each one is rare/one-off enough that
-// treating it as its own always-distinct "suit" (keyed by id) is simplest --
-// it never counts as clumping with anything, itself included.
+// A QuakeCard/CleaveCard carries no suit, and each one is rare/one-off
+// enough that treating it as its own always-distinct "suit" (keyed by kind
+// and id) is simplest -- it never counts as clumping with anything, itself
+// included.
 function suitKeyOf(card: Card): string {
-  return card.kind === 'creature' ? card.suit : `quake:${card.id}`;
+  return card.kind === 'creature' ? card.suit : `${card.kind}:${card.id}`;
 }
 
 /**

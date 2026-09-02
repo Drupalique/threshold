@@ -1,15 +1,59 @@
+import type { DeckActionKind } from '../../types/run';
 import { useRun } from '../../state/runContextObject';
 import { CardChip } from '../components/CardChip';
+
+// Shop-only labels for the 3 deck actions (MECHANIC_BRAINSTORM.md's Suit
+// Reroll/Duplicate/Card Upgrade) -- pure display text, the actual
+// eligibility/effect logic lives in engine/rewardGenerator.ts's
+// eligibleDeckActions and runEngine.ts's resolveDeckAction.
+const DECK_ACTION_INFO: Record<DeckActionKind, { name: string; description: string; pickPrompt: string }> = {
+  transform: {
+    name: 'Transform',
+    description: 'Reroll a deck card into a random different suit.',
+    pickPrompt: 'Choose a card to reroll into a different suit',
+  },
+  duplicate: {
+    name: 'Duplicate',
+    description: 'Copy a card already in your deck.',
+    pickPrompt: 'Choose a card to duplicate',
+  },
+  upgrade: {
+    name: 'Upgrade',
+    description: "Promote a plain card into its suit's named special.",
+    pickPrompt: 'Choose a plain card to upgrade',
+  },
+};
 
 /**
  * A currency shop stop -- unlike RewardScreen/ShrineScreen's exclusive
  * pick-1, any number of the offered slots can be bought in one visit (each
  * click both spends currency and removes that slot from the list), then
  * Leave proceeds to the next door choice. See runEngine.ts's
- * buyShopOption/leaveShop.
+ * buyShopOption/leaveShop. Buying a deck-action slot (Transform/Duplicate/
+ * Upgrade) doesn't apply anything immediately -- it sets
+ * state.pendingDeckAction, which swaps this screen over to a card-picker
+ * (the same rest-deck-grid/CardChip pattern RestScreen.tsx's "Remove a
+ * card" option already uses) until resolveDeckAction is called.
  */
 export function ShopScreen() {
-  const { state, buyShopOption, leaveShop } = useRun();
+  const { state, buyShopOption, resolveDeckAction, leaveShop } = useRun();
+
+  if (state.pendingDeckAction) {
+    const { action } = state.pendingDeckAction;
+    const eligible = state.deck.filter((c) => c.kind === 'creature' && (action !== 'upgrade' || !c.specialId));
+    return (
+      <div className="shop-screen">
+        <h2>Room {state.depth + 1} -- a shop</h2>
+        <p>{DECK_ACTION_INFO[action].pickPrompt}</p>
+        <div className="rest-deck-grid">
+          {eligible.map((card) => (
+            <CardChip key={card.id} card={card} onClick={() => resolveDeckAction(card.id)} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const options = state.shopOptions ?? [];
 
   return (
@@ -30,7 +74,8 @@ export function ShopScreen() {
               </div>
             );
           }
-          const item = option.optionType === 'relic' ? option.relic : option.potion;
+          const item =
+            option.optionType === 'relic' ? option.relic : option.optionType === 'potion' ? option.potion : DECK_ACTION_INFO[option.action];
           return (
             <div key={option.id} className={className} onClick={buy}>
               <h3>{item.name}</h3>

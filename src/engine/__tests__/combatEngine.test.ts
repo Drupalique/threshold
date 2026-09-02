@@ -1510,3 +1510,246 @@ describe('currency (claim overflow)', () => {
     expect(next.log.some((l) => l.type === 'currency')).toBe(false);
   });
 });
+
+describe('Vulnerable', () => {
+  it("inflates incoming threat damage on the TARGET's own stacks by a flat percentage, but leaves rider bonus damage untouched", () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30, statuses: { vulnerable: 1 } })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [
+        { id: 't1', suit: 'wolf', ownerId: 'room' },
+        { id: 't2', suit: 'wolf', ownerId: 'room' },
+      ],
+      playerHand: [
+        { id: 'ph1', kind: 'creature', suit: 'wolf' },
+        { id: 'ph2', kind: 'creature', suit: 'wolf' },
+      ],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1', 'ph2'] },
+      rng,
+    );
+
+    // 2 on table + 2 played = 4 on the table x 2 hand cards = 8 base,
+    // inflated by Vulnerable's +25% -> round(8*1.25) = 10, plus each played
+    // card's own +1 basic rider (never touched by Vulnerable) = 12 total.
+    expect(next.enemies[0].hp).toBe(30 - 12);
+  });
+
+  it('does nothing when the target holds no Vulnerable stacks', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf' }],
+    });
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+    expect(next.enemies[0].hp).toBe(30 - 1 - 1); // 1 base + 1 basic rider, no inflation
+  });
+});
+
+describe('Regen', () => {
+  it("heals the holder for its current stack count at end of turn, then decays -- Poison's mirror", () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 10, hpMax: 20, statuses: { regen: 3 }, hand: [] })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, { playerHand: [], activeTurn: 'enemy', activeEnemyIndex: 0 });
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+    expect(next.enemies[0].hp).toBe(10 + 3);
+    expect(next.enemies[0].statuses.regen).toBe(2);
+  });
+
+  it('caps healing at hpMax', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 19, hpMax: 20, statuses: { regen: 3 }, hand: [] })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, { playerHand: [], activeTurn: 'enemy', activeEnemyIndex: 0 });
+    const next = applyCombatAction(state, { type: 'ENEMY_TURN' }, rng);
+    expect(next.enemies[0].hp).toBe(20);
+  });
+
+  it("heals the player at the end of their own turn the same way", () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1' })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 10, 20, { playerHand: [], playerStatuses: { regen: 4 } });
+    const next = applyCombatAction(state, { type: 'PLAYER_PASS' }, rng);
+    expect(next.playerHP).toBe(10 + 4);
+    expect(next.playerStatuses.regen).toBe(3);
+  });
+});
+
+describe('Haste and Slow', () => {
+  it("adjust the player's next playsRemaining allotment by +1/-1 per stack, floored at 0", () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1', hand: [] })] });
+    const rng = createRng(1);
+
+    const hasted = applyCombatAction(
+      makeCombat(room, rng, 30, 30, { playerHand: [], playerStatuses: { haste: 2 }, activeTurn: 'enemy', activeEnemyIndex: 0 }),
+      { type: 'ENEMY_TURN' },
+      rng,
+    );
+    expect(hasted.activeTurn).toBe('player');
+    expect(hasted.playsRemaining).toBe(PLAYS_PER_TURN_BASE + 2);
+
+    const flooredSlow = applyCombatAction(
+      makeCombat(room, rng, 30, 30, { playerHand: [], playerStatuses: { slow: 5 }, activeTurn: 'enemy', activeEnemyIndex: 0 }),
+      { type: 'ENEMY_TURN' },
+      rng,
+    );
+    expect(flooredSlow.playsRemaining).toBe(0); // floored, never negative
+  });
+
+  it("grant/take an enemy's own play allotment for its turn the same way", () => {
+    const room = makeRoom({ enemies: [makeEnemy({ instanceId: 'e1' })] });
+    const rng = createRng(70);
+
+    const hastedEnemyState: CombatState = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [],
+      enemies: [
+        makeEnemy({
+          instanceId: 'e1',
+          statuses: { haste: 1 },
+          hand: [
+            { id: 'e1h1', kind: 'creature', suit: 'wolf' },
+            { id: 'e1h2', kind: 'creature', suit: 'ember' },
+          ],
+        }),
+      ],
+      activeTurn: 'enemy',
+      activeEnemyIndex: 0,
+    });
+    const hastedNext = applyCombatAction(hastedEnemyState, { type: 'ENEMY_TURN' }, rng);
+    // Base ENEMY_PLAYS_PER_TURN (1) would only ever play one of the two
+    // suits in hand (an enemy always commits a whole suit at once) --
+    // Haste's +1 lets it play both.
+    expect(hastedNext.log.filter((l) => l.type === 'play' && l.actor === 'enemy').length).toBe(2);
+
+    const slowedEnemyState: CombatState = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [],
+      enemies: [makeEnemy({ instanceId: 'e1', statuses: { slow: 3 }, hand: [{ id: 'e1h1', kind: 'creature', suit: 'wolf' }] })],
+      activeTurn: 'enemy',
+      activeEnemyIndex: 0,
+    });
+    const slowedNext = applyCombatAction(slowedEnemyState, { type: 'ENEMY_TURN' }, rng);
+    // Floored at 0 -- the enemy's turn is skipped entirely, no play/pass log at all.
+    expect(slowedNext.playerHP).toBe(30);
+    expect(slowedNext.log.some((l) => l.actor === 'enemy' && (l.type === 'play' || l.type === 'pass'))).toBe(false);
+  });
+});
+
+describe('guard-strip relic (Sunder)', () => {
+  it("strips a flat amount of Guard from the target, capped at what they currently hold", () => {
+    const room = makeRoom({
+      params: { ...makeRoom().params, threatSuits: ['hex'] },
+      enemies: [makeEnemy({ hp: 30, hpMax: 30, guard: 5 })],
+    });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'hex' }],
+      relics: [relicById('hexbreakers-edge')],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'hex', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    // The played card's own basic rider (bonus-damage 1, since Hex is a
+    // weaken/enemy-targeting category) absorbs 1 off Guard first (5 -> 4),
+    // then Hexbreaker's Edge strips its own flat 2 (4 -> 2).
+    expect(next.enemies[0].guard).toBe(2);
+    expect(next.log.some((l) => l.message.includes("Hexbreaker's Edge"))).toBe(true);
+  });
+
+  it('caps the strip at whatever Guard the target still holds, rather than going negative', () => {
+    const room = makeRoom({
+      params: { ...makeRoom().params, threatSuits: ['hex'] },
+      enemies: [makeEnemy({ hp: 30, hpMax: 30, guard: 2 })],
+    });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'hex' }],
+      relics: [relicById('hexbreakers-edge')],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'hex', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    // The basic rider's 1 bonus-damage absorbs 1 off Guard (2 -> 1); the
+    // relic then wants to strip 2 but only 1 remains -- capped, never negative.
+    expect(next.enemies[0].guard).toBe(0);
+  });
+});
+
+describe('AOE tier 1: splash rider (bonus-damage-aoe)', () => {
+  it('a card carrying a bonus-damage-aoe rider hits every alive enemy, on top of the chosen target\'s own single-target effect', () => {
+    const room = makeRoom({
+      enemies: [
+        makeEnemy({ instanceId: 'e1', hp: 30, hpMax: 30 }),
+        makeEnemy({ instanceId: 'e2', hp: 30, hpMax: 30 }),
+      ],
+    });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'ember', specialId: 'cinder-storm' }],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'ember', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    // Main category effect: 0 on table + 1 played = 1 x 1 = 1 damage, e1 only.
+    // Splash rider: +2 bonus-damage-aoe to EVERY alive enemy, e1 included.
+    expect(next.enemies.find((e) => e.instanceId === 'e1')!.hp).toBe(30 - 1 - 2);
+    expect(next.enemies.find((e) => e.instanceId === 'e2')!.hp).toBe(30 - 2);
+  });
+});
+
+describe('Cleave setup card (AOE tier 2)', () => {
+  it("flags the next threat play to hit every alive enemy without a chosen target, then clears itself", () => {
+    const room = makeRoom({
+      enemies: [
+        makeEnemy({ instanceId: 'e1', hp: 30, hpMax: 30 }),
+        makeEnemy({ instanceId: 'e2', hp: 30, hpMax: 30 }),
+      ],
+    });
+    const rng = createRng(1);
+    let state: CombatState = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [
+        { id: 'phc', kind: 'cleave' },
+        { id: 'ph1', kind: 'creature', suit: 'wolf' },
+      ],
+    });
+
+    state = applyCombatAction(state, { type: 'PLAYER_PLAY_CLEAVE', cardId: 'phc' }, rng);
+    expect(state.cleaveActive).toBe(true);
+    expect(state.activeTurn).toBe('player'); // free action, doesn't end the turn
+    expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE); // and doesn't spend a play
+
+    // No targetInstanceId given -- isLegalPlay waives it while cleaveActive.
+    state = applyCombatAction(state, { type: 'PLAY_SET', suit: 'wolf', handCardIds: ['ph1'] }, rng);
+
+    // 0 on table + 1 played = 1 x 1 = 1 damage lands on EACH alive enemy.
+    // (The played card's own basic rider needs a specific target to resolve
+    // against, so it's a no-op here -- only the category magnitude widens.)
+    expect(state.enemies.find((e) => e.instanceId === 'e1')!.hp).toBe(30 - 1);
+    expect(state.enemies.find((e) => e.instanceId === 'e2')!.hp).toBe(30 - 1);
+    expect(state.cleaveActive).toBe(false); // cleared once the threat play resolved
+  });
+});

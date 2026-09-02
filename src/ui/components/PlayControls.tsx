@@ -1,5 +1,5 @@
 import type { PlayPreview } from '../../engine/combatEngine';
-import { WEAKEN_PCT } from '../../config/constants';
+import { WEAKEN_PCT, VULNERABLE_PCT } from '../../config/constants';
 
 interface PlayControlsProps {
   isPlayerTurn: boolean;
@@ -24,7 +24,11 @@ interface PlayControlsProps {
 }
 
 // Core-effect resource name per suit category -- what `magnitude` itself
-// measures before any rider bonus is added.
+// measures before any rider bonus is added. SuitCategory is
+// 'threat'|'boon'|'guard'|StatusId (see types/suits.ts) -- no suit's
+// category is (or is planned to be) vulnerable/regen/haste/slow, only
+// weaken/poison/strength have a status-suit, but the Record still needs
+// every StatusId covered to typecheck. Unreachable in practice.
 const RESOURCE_LABEL: Record<PlayPreview['category'], string> = {
   threat: 'damage',
   boon: 'healing',
@@ -32,6 +36,10 @@ const RESOURCE_LABEL: Record<PlayPreview['category'], string> = {
   weaken: 'Weaken stacks',
   poison: 'Poison stacks',
   strength: 'Strength stacks',
+  vulnerable: 'Vulnerable stacks',
+  regen: 'Regen stacks',
+  haste: 'Haste stacks',
+  slow: 'Slow stacks',
 };
 
 // Whether a category's rider bonus lands on the SAME resource as its core
@@ -45,23 +53,26 @@ function riderSharesResource(category: PlayPreview['category']): boolean {
 
 /** One line describing this play's full effect: the base magnitude (with a note for any Strength/Weaken folded into it), plus its rider bonus -- combined into one total when the rider lands on the same resource, called out separately when it doesn't (see riderSharesResource). */
 function describePreview(preview: PlayPreview, selectedCount: number): string {
-  const { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, bonusDamage, bonusGuard } = preview;
+  const { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe } = preview;
   const resourceLabel = RESOURCE_LABEL[category];
   const buffNotes = [
     strengthStacks > 0 ? `+${strengthStacks} from Strength` : null,
     weakenStacks > 0 ? `weakened -${Math.round(WEAKEN_PCT * 100)}%` : null,
+    vulnerableStacks > 0 ? `target Vulnerable +${Math.round(VULNERABLE_PCT * 100)}%` : null,
   ].filter((n): n is string => n !== null);
   const buffSuffix = buffNotes.length > 0 ? ` (${buffNotes.join(', ')})` : '';
 
   const core = `${selectedCount} x ${tableCountAfterPlay} = ${magnitude} ${resourceLabel}${buffSuffix}`;
 
-  const bonus = bonusDamage > 0 ? bonusDamage : bonusGuard > 0 ? bonusGuard : 0;
+  const damageBonus = bonusDamage + bonusDamageAoe;
+  const bonus = damageBonus > 0 ? damageBonus : bonusGuard > 0 ? bonusGuard : 0;
   if (bonus === 0) return core;
 
   if (riderSharesResource(category)) {
-    return `${core} +${bonus} rider = ${magnitude + bonus} ${resourceLabel} total`;
+    const aoeSuffix = bonusDamageAoe > 0 ? ` (${bonusDamageAoe} splashes to every other enemy)` : '';
+    return `${core} +${bonus} rider${aoeSuffix} = ${magnitude + bonus} ${resourceLabel} total`;
   }
-  const bonusLabel = bonusDamage > 0 ? 'damage' : 'Guard';
+  const bonusLabel = damageBonus > 0 ? 'damage' : 'Guard';
   return `${core} -- rider also adds +${bonus} ${bonusLabel}`;
 }
 

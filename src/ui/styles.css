@@ -106,6 +106,18 @@ button {
 .status-badge--strength {
   background: #a5690d;
 }
+.status-badge--vulnerable {
+  background: #b0392b;
+}
+.status-badge--regen {
+  background: #1e8449;
+}
+.status-badge--haste {
+  background: #b7950b;
+}
+.status-badge--slow {
+  background: #34495e;
+}
 
 /* --- Enemies --- */
 
@@ -312,6 +324,12 @@ button {
   color: #fff;
 }
 
+.card-chip--cleave {
+  background: linear-gradient(135deg, #c0392b, #e67e22);
+  border: 2px dashed #fff;
+  color: #fff;
+}
+
 .card-chip--special {
   border: 2px solid #f1c40f;
   box-shadow: 0 0 6px rgba(241, 196, 15, 0.6);
@@ -467,6 +485,16 @@ button {
 .play-controls-note {
   color: #999;
   font-size: 0.9rem;
+}
+
+.cleave-banner {
+  margin: 0.4rem 0;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #c0392b, #e67e22);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 .play-preview {

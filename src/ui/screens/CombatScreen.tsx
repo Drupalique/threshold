@@ -89,7 +89,12 @@ export function CombatScreen() {
       ? legalTargets.filter((t) => t.suit === selectedSuit && t.targetInstanceId).map((t) => t.targetInstanceId!)
       : [],
   );
-  const needsTarget = targetableInstanceIds.size > 1 && !selectedTargetInstanceId;
+  const selectedCategory = selectedSuit ? SUIT_DEFINITIONS.find((s) => s.id === selectedSuit)!.category : null;
+  // Cleave (MECHANIC_BRAINSTORM.md's AOE tier 2) waives the target
+  // requirement for exactly the next threat play -- see isLegalPlay's own
+  // matching bypass.
+  const cleaveWaivesTarget = selectedCategory === 'threat' && combat.cleaveActive;
+  const needsTarget = targetableInstanceIds.size > 1 && !selectedTargetInstanceId && !cleaveWaivesTarget;
   // Boon/guard/Vigor suits have no target; threat/Hex/Venom suits auto-
   // resolve onto the lone survivor when exactly one enemy is alive.
   const suitNeedsNoTarget = selectedSuit
@@ -123,6 +128,10 @@ export function CombatScreen() {
     setPendingPotion(null);
     if (card.kind === 'quake') {
       dispatchCombat({ type: 'PLAYER_PLAY_QUAKE', cardId: card.id });
+      return;
+    }
+    if (card.kind === 'cleave') {
+      dispatchCombat({ type: 'PLAYER_PLAY_CLEAVE', cardId: card.id });
       return;
     }
     if (selectedSuit !== card.suit) {
@@ -198,12 +207,13 @@ export function CombatScreen() {
 
   // Built from the same magnitude/rider math performPlay itself uses (see
   // previewPlayerPlay), so this can never drift from what actually resolves
-  // -- includes Strength/Weaken (threat plays only) and every selected
-  // card's rider bonus, not just the base hand-count x table-count product.
+  // -- includes Strength/Weaken/Vulnerable (threat plays only) and every
+  // selected card's rider bonus, not just the base hand-count x table-count
+  // product.
   const playPreview = selectedSuit && selectedIds.size > 0
-    ? previewPlayerPlay(combat, selectedSuit, Array.from(selectedIds))
+    ? previewPlayerPlay(combat, selectedSuit, Array.from(selectedIds), selectedTargetInstanceId ?? undefined)
     : null;
-  const hasChosenTarget = suitNeedsNoTarget || selectedTargetInstanceId !== null;
+  const hasChosenTarget = suitNeedsNoTarget || cleaveWaivesTarget || selectedTargetInstanceId !== null;
   const hasPlaysLeft = combat.playsRemaining > 0;
   const canPlay =
     canAct &&
@@ -236,6 +246,9 @@ export function CombatScreen() {
       <div className="combat-main">
         <div className="combat-column">
           <TableDisplay table={combat.table} enemies={combat.enemies} highlightSuit={selectedSuit} />
+          {combat.cleaveActive && (
+            <div className="cleave-banner">Cleave active -- the next threat play hits every alive enemy.</div>
+          )}
           <HandDisplay
             hand={combat.playerHand}
             selectedIds={selectedIds}

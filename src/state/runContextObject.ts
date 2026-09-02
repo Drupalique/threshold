@@ -14,6 +14,7 @@ export interface RunContextValue {
   chooseRelic: (relicId: string) => void;
   skipShrine: () => void;
   buyShopOption: (optionId: string) => void;
+  resolveDeckAction: (cardId: string) => void;
   leaveShop: () => void;
   chooseDoor: (doorId: string) => void;
   restart: () => void;
