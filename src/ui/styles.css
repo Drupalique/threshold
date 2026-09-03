@@ -1176,3 +1176,66 @@ button {
   font-size: 0.9rem;
   color: #ccc;
 }
+
+/* --- Deck & Inventory tab (DeckScreen) --- */
+
+.deck-screen-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.deck-screen-currency {
+  font-weight: 600;
+  color: #f1c40f;
+}
+
+.deck-screen-section {
+  margin-bottom: 2rem;
+}
+
+.deck-screen-section h3 {
+  margin-bottom: 0.75rem;
+  color: #ccc;
+}
+
+.deck-screen-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.deck-screen-group {
+  background: #1c1c26;
+  border: 1px solid #3a3a4a;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.deck-screen-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-weight: 700;
+  margin-bottom: 0.6rem;
+}
+
+.deck-screen-group-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #888;
+}
+
+.deck-screen-group-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.deck-screen-empty {
+  color: #888;
+  font-size: 0.9rem;
+}

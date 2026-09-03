@@ -3,7 +3,7 @@ import type { DoorColor } from '../types/door';
 import type { PoolSizeBand, IntRange } from '../types/room';
 import type { CreatureCard } from '../types/cards';
 import { cardCopies, specialCard } from './cardHelpers';
-import { specialCardById } from './specialCards';
+import { specialCardsBySuit } from './specialCards';
 
 // --- Content data -----------------------------------------------------
 
@@ -242,31 +242,53 @@ export const DOOR_TREE_VIEW_SCALE = 2;
 
 export const RUN_MAX_DEPTH = 10;
 
-// The run's starting deck -- 19 cards, weighted toward the four threat
-// suits with a light scattering of every support suit so an early room
-// almost always has *something* live to play. A balance surface like every
-// ratio constant above; expect to retune with fresh playtesting data.
-// One copy per suit is swapped for that suit's named special card (see
-// config/specialCards.ts) rather than added on top -- deck size (19) and
-// per-suit counts are unchanged from before specials existed, so every
-// existing balance ratio still applies unmodified.
-export const STARTER_DECK: CreatureCard[] = [
-  ...cardCopies('wolf', 2, 'starter'),
-  specialCard(specialCardById('alpha-wolf'), 'starter'),
-  ...cardCopies('ember', 2, 'starter'),
-  specialCard(specialCardById('wildfire'), 'starter'),
-  ...cardCopies('rot', 2, 'starter'),
-  specialCard(specialCardById('rot-colossus'), 'starter'),
-  ...cardCopies('spider', 2, 'starter'),
-  specialCard(specialCardById('broodcaller'), 'starter'),
-  ...cardCopies('grace', 1, 'starter'),
-  specialCard(specialCardById('blessed-grace'), 'starter'),
-  ...cardCopies('ward', 1, 'starter'),
-  specialCard(specialCardById('bastion-heart'), 'starter'),
-  specialCard(specialCardById('withering-hex'), 'starter'),
-  specialCard(specialCardById('widows-kiss'), 'starter'),
-  specialCard(specialCardById('battle-fury'), 'starter'),
-];
+// How many of the 9 suits a run's starter deck draws from (see runEngine.ts's
+// pickStarterSuits: 1 guaranteed threat suit, the single guard suit, and
+// STARTER_SUIT_COUNT-2 more drawn from the remaining boon/weaken/poison/
+// strength suits) -- deliberately fewer than the full roster so an early
+// hand actually clusters on the suits it has, instead of a 7-card hand from
+// a 9-suit deck rarely matching any given room's 1-2 active threat suits
+// (see GAME_DESIGN.md). Reward/shop offers stay unrestricted (rewardGenerator
+// .ts's REWARD_SUITS spans all 9) -- only the *starting point* is narrowed,
+// so a player grows back into suit variety at their own pace.
+export const STARTER_SUIT_COUNT = 4;
+
+// Per-suit starter card counts by category -- threat and guard are levelled
+// at the same count (STARTER_SUIT_ATTACK_BLOCK_COUNT) so the guaranteed
+// threat suit and the guaranteed guard suit each land around 5 cards
+// (4 plain + 1 named special), giving the starter deck's attack and block
+// piles rough parity -- there are 4 threat suits to guard's 1, so without
+// this the lone guard suit would always be badly outweighted. Every other
+// category (boon/weaken/poison/strength) starts with nothing but its named
+// special, same "light taste" as before.
+const STARTER_SUIT_ATTACK_BLOCK_COUNT = 4;
+function starterPlainCountForCategory(category: SuitDef['category']): number {
+  if (category === 'threat' || category === 'guard') return STARTER_SUIT_ATTACK_BLOCK_COUNT;
+  return 0;
+}
+
+// Builds a starter deck for a chosen subset of suits -- each suit contributes
+// its category's plain-card count (starterPlainCountForCategory) plus one
+// copy of its first named special (specialCardsBySuit's authoring order),
+// same "swap one generic copy for the signature card" rule the old fixed
+// STARTER_DECK used.
+export function buildStarterDeck(suits: SuitId[]): CreatureCard[] {
+  const cards: CreatureCard[] = [];
+  for (const suitId of suits) {
+    const suitDef = SUIT_DEFINITIONS.find((s) => s.id === suitId)!;
+    const plainCount = starterPlainCountForCategory(suitDef.category);
+    cards.push(...cardCopies(suitId, plainCount, 'starter'));
+    const [firstSpecial] = specialCardsBySuit(suitId);
+    if (firstSpecial) cards.push(specialCard(firstSpecial, 'starter'));
+  }
+  return cards;
+}
+
+// The full-roster starter deck (all 9 suits) -- used as a fixture wherever a
+// representative sample deck is needed outside an actual run (tests, dev
+// tooling), not by createNewRun itself, which narrows to STARTER_SUIT_COUNT
+// suits via runEngine.ts's pickStarterSuits.
+export const STARTER_DECK: CreatureCard[] = buildStarterDeck(SUIT_DEFINITIONS.map((s) => s.id));
 
 // --- Rewards ------------------------------------------------------------
 
@@ -335,12 +357,26 @@ export const REWARD_THREAT_SUIT_BIAS = 0.7;
 // not balance-tested.
 export const CURRENCY_CLAIM_THRESHOLD = 5;
 
+// Disabled for now -- currency only ever spends at a shop, and shops are
+// disabled below (SHOP_ROOM_RATIO), so an accruing-but-unspendable number
+// felt incongruous. Gates combatEngine.ts's applyCurrencyOverflow to a flat
+// no-op regardless of CURRENCY_CLAIM_THRESHOLD, rather than folding the
+// disable into the threshold itself, so the threshold's own tuned value and
+// the tests exercising its math stay intact for whenever this flips back on
+// (see combatEngine.test.ts's skipped 'currency (claim overflow)' suite).
+export const CURRENCY_ENABLED = false;
+
 // --- Shops ----------------------------------------------------------------
 // Independent per-door-candidate odds a door leads to a shop instead of a
 // combat room -- rolled alongside REST_ROOM_RATIO/SHRINE_ROOM_RATIO, same
 // never-on-the-final-floor exclusion. Same tier as SHRINE_ROOM_RATIO: a
 // currency-gated wider offering is a comparably rare find to a relic.
-export const SHOP_ROOM_RATIO = 0.08;
+// Disabled for now (0 -- weightedPick's own weight>0 filter drops it, so
+// runTree's room-kind roll never lands on 'shop'; its share folds back into
+// 'combat' automatically since that weight is the complement of the other
+// three). Restore to 0.08 alongside CURRENCY_CLAIM_THRESHOLD above to bring
+// shops back.
+export const SHOP_ROOM_RATIO = 0;
 
 // How many priced options a shop offers at once -- deliberately more than
 // REWARD_OPTION_COUNT, since (unlike the reward screen's exclusive pick-1)

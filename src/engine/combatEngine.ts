@@ -27,6 +27,7 @@ import {
   ENEMY_PLAYS_PER_TURN,
   QUAKE_BONUS_PLAYS,
   CURRENCY_CLAIM_THRESHOLD,
+  CURRENCY_ENABLED,
 } from '../config/constants';
 
 const suitCategory = (suit: SuitId) =>
@@ -152,6 +153,7 @@ export function initCombat(
  * unconditionally after every claim.
  */
 function applyCurrencyOverflow(state: CombatState, roomCountBeforeClaim: number): CombatState {
+  if (!CURRENCY_ENABLED) return state;
   const overflow = roomCountBeforeClaim - CURRENCY_CLAIM_THRESHOLD;
   if (overflow <= 0) return state;
   const currency = state.currency + overflow;

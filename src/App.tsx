@@ -11,6 +11,7 @@ import { DoorChoiceScreen } from './ui/screens/DoorChoiceScreen';
 import { RunEndScreen } from './ui/screens/RunEndScreen';
 import { RunTreeScreen } from './ui/screens/RunTreeScreen';
 import { CompendiumScreen } from './ui/screens/CompendiumScreen';
+import { DeckScreen } from './ui/screens/DeckScreen';
 import { useLogPlayback } from './ui/hooks/useLogPlayback';
 import './ui/styles.css';
 
@@ -70,16 +71,11 @@ function CombatTopBarStatus() {
           {` -- ${combat.playsRemaining} play${combat.playsRemaining === 1 ? '' : 's'} left`}
         </span>
       )}
-      {/* Live during combat since claim-overflow currency (see
-          combatEngine.ts's applyCurrencyOverflow) is earned mid-fight, not
-          just at a shop -- surfacing it here lets a player see it tick up
-          as it happens. */}
-      <span className="topbar-currency">{` -- ${combat.currency} currency`}</span>
     </div>
   );
 }
 
-type Tab = 'game' | 'tree' | 'items';
+type Tab = 'game' | 'deck' | 'tree' | 'items';
 
 function App() {
   const [tab, setTab] = useState<Tab>('game');
@@ -93,6 +89,13 @@ function App() {
             onClick={() => setTab('game')}
           >
             Game
+          </button>
+          <button
+            type="button"
+            className={tab === 'deck' ? 'tab-button tab-button--active' : 'tab-button'}
+            onClick={() => setTab('deck')}
+          >
+            Deck
           </button>
           <button
             type="button"
@@ -111,6 +114,7 @@ function App() {
           <CombatTopBarStatus />
         </div>
         {tab === 'game' && <Router />}
+        {tab === 'deck' && <DeckScreen />}
         {tab === 'tree' && <RunTreeScreen />}
         {tab === 'items' && <CompendiumScreen />}
       </div>

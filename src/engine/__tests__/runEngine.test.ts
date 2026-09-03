@@ -157,7 +157,13 @@ describe('reward flow', () => {
     run2 = resolveCombatEnd(clearCurrentRoom(run2));
     expect(run2.rewardOptions!.map((c) => c.id)).toEqual(run.rewardOptions!.map((c) => c.id));
 
-    const chosenId = run.rewardOptions![0].id;
+    // Pick whichever reward option is a card -- reward slots can also be a
+    // relic or potion (see the optionType-filtered tests below), neither of
+    // which lands in run.deck, so this test needs a card specifically rather
+    // than assuming index 0 happens to be one.
+    const cardOption = run.rewardOptions!.find((o) => o.optionType === 'card');
+    if (cardOption?.optionType !== 'card') throw new Error('expected seed 99 to offer a card reward');
+    const chosenId = cardOption.id;
     const deckSizeBefore = run.deck.length;
     run = chooseReward(run, chosenId);
 

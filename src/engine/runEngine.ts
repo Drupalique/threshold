@@ -3,18 +3,39 @@ import type { Door } from '../types/door';
 import type { CombatRoomInstance } from '../types/room';
 import type { CombatAction } from '../types/combat';
 import type { Card, CreatureCard } from '../types/cards';
-import { createRng } from './rng';
+import type { SuitId } from '../types/suits';
+import { createRng, type Rng } from './rng';
 import { buildRunTree } from './runTree';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
 import { generateRewardOptions, generateShrineOptions, generateShopOptions, REWARD_SUITS } from './rewardGenerator';
-import { uniformPick } from './weightedPick';
+import { uniformPick, pickDistinct } from './weightedPick';
 import { specialCardsBySuit } from '../config/specialCards';
-import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_DECK } from '../config/constants';
+import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_SUIT_COUNT, SUIT_DEFINITIONS, THREAT_SUITS, GUARD_SUIT, buildStarterDeck } from '../config/constants';
+
+// Picks STARTER_SUIT_COUNT suits for a run's starter deck (see constants.ts's
+// buildStarterDeck/starterPlainCountForCategory): one random threat suit plus
+// the single guard suit are always both included -- paired with threat and
+// guard sharing the same, deliberately bumped starter card count, this is
+// what gets the starting deck's attack and block piles to roughly the same
+// size despite there being 4 threat suits to guard's 1. The remaining slots
+// fill from every other (non-threat, non-guard) suit -- boon/weaken/poison/
+// strength -- for the deck's "a couple of other cards" variety. Reward/shop
+// offers aren't narrowed to this pool (REWARD_SUITS stays all 9) -- only the
+// starting point is shaped this way, so a player grows back into suit
+// variety at their own pace.
+function pickStarterSuits(rng: Rng): SuitId[] {
+  const guaranteedThreatSuit = uniformPick(rng, THREAT_SUITS);
+  const fillerSuits = SUIT_DEFINITIONS.map((s) => s.id).filter((id) => id !== GUARD_SUIT && !THREAT_SUITS.includes(id));
+  const fillers = pickDistinct(rng, fillerSuits, STARTER_SUIT_COUNT - 2);
+  return [guaranteedThreatSuit, GUARD_SUIT, ...fillers];
+}
 
 export function createNewRun(seed: number): RunState {
+  const rng = createRng(seed);
+  const deck = buildStarterDeck(pickStarterSuits(rng));
   return {
     seed,
-    rng: createRng(seed),
+    rng,
     runTree: buildRunTree(seed, RUN_MAX_DEPTH),
     currentPath: '',
     depth: 0,
@@ -22,7 +43,7 @@ export function createNewRun(seed: number): RunState {
     playerHP: PLAYER_HP_MAX,
     playerHPMax: PLAYER_HP_MAX,
     phase: 'start',
-    deck: [...STARTER_DECK],
+    deck,
     relics: [],
     potions: [],
     currency: 0,
