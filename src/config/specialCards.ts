@@ -1,6 +1,7 @@
 import type { SuitId, SuitCategory } from '../types/suits';
 import type { SpecialCardDef, RiderEffect } from '../types/specialCards';
 import type { CreatureCard } from '../types/cards';
+import { STATUS_DEFS } from '../types/status';
 
 /**
  * One named special card per suit (v1 scope) -- each is an ordinary suited
@@ -19,6 +20,12 @@ const RIDER_AMOUNT = 3;
 // Splash-rider amount (MECHANIC_BRAINSTORM.md's AOE tier 1) -- deliberately
 // smaller than RIDER_AMOUNT since it hits every alive enemy, not just one.
 const AOE_RIDER_AMOUNT = 2;
+
+// Status-rider amount -- every suit's second named special (below) grants or
+// inflicts this many stacks of a status the suit doesn't already own as its
+// base category effect. Same tier as AOE_RIDER_AMOUNT: a side-effect on a
+// different resource, not the suit's own headline number.
+const STATUS_RIDER_AMOUNT = 2;
 
 export const SPECIAL_CARD_DEFS: SpecialCardDef[] = [
   {
@@ -95,6 +102,70 @@ export const SPECIAL_CARD_DEFS: SpecialCardDef[] = [
     description: `Also deals ${AOE_RIDER_AMOUNT} damage to every alive enemy.`,
     rider: { kind: 'bonus-damage-aoe', amount: AOE_RIDER_AMOUNT },
   },
+
+  // Every other suit's second named special -- same reward/shop-pool-only
+  // deal as Cinder Storm above, but using the new bonus-status rider
+  // (types/specialCards.ts) instead of a bigger damage/guard number, so
+  // deck-building has a real second axis (which status you're stacking, not
+  // just how hard you hit). threat suits inflict a debuff on the same
+  // target their claim already hits; boon/guard/strength suits grant a buff
+  // to whoever played the card, same reach as their own bonus-guard cousins.
+  {
+    id: 'bloodfang',
+    suit: 'wolf',
+    name: 'Bloodfang',
+    description: `Also inflicts ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.vulnerable.name} on the target.`,
+    rider: { kind: 'bonus-status', statusId: 'vulnerable', amount: STATUS_RIDER_AMOUNT },
+  },
+  {
+    id: 'creeping-rot',
+    suit: 'rot',
+    name: 'Creeping Rot',
+    description: `Also inflicts ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.slow.name} on the target.`,
+    rider: { kind: 'bonus-status', statusId: 'slow', amount: STATUS_RIDER_AMOUNT },
+  },
+  {
+    id: 'widowbite',
+    suit: 'spider',
+    name: 'Widowbite',
+    description: `Also inflicts ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.poison.name} on the target.`,
+    rider: { kind: 'bonus-status', statusId: 'poison', amount: STATUS_RIDER_AMOUNT },
+  },
+  {
+    id: 'zealous-grace',
+    suit: 'grace',
+    name: 'Zealous Grace',
+    description: `Also grants yourself ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.haste.name}.`,
+    rider: { kind: 'bonus-status', statusId: 'haste', amount: STATUS_RIDER_AMOUNT },
+  },
+  {
+    id: 'aegis-bloom',
+    suit: 'ward',
+    name: 'Aegis Bloom',
+    description: `Also grants yourself ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.regen.name}.`,
+    rider: { kind: 'bonus-status', statusId: 'regen', amount: STATUS_RIDER_AMOUNT },
+  },
+  {
+    id: 'grasping-curse',
+    suit: 'hex',
+    name: 'Grasping Curse',
+    description: `Also inflicts ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.vulnerable.name} on the target.`,
+    rider: { kind: 'bonus-status', statusId: 'vulnerable', amount: STATUS_RIDER_AMOUNT },
+  },
+  {
+    id: 'creeping-blight',
+    suit: 'venom',
+    name: 'Creeping Blight',
+    description: `Also inflicts ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.slow.name} on the target.`,
+    rider: { kind: 'bonus-status', statusId: 'slow', amount: STATUS_RIDER_AMOUNT },
+  },
+  {
+    id: 'second-wind',
+    suit: 'vigor',
+    name: 'Second Wind',
+    description: `Also grants yourself ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.regen.name}.`,
+    rider: { kind: 'bonus-status', statusId: 'regen', amount: STATUS_RIDER_AMOUNT },
+  },
 ];
 
 export function specialCardById(id: string): SpecialCardDef {
@@ -116,7 +187,7 @@ export const BASIC_RIDER_AMOUNT = 1;
 // Same threat/weaken/poison-vs-boon/guard/strength split SPECIAL_CARD_DEFS
 // already follows by hand above: categories that resolve against a target
 // get a damage rider, self-targeting categories get a guard rider.
-function riderKindForCategory(category: SuitCategory): RiderEffect['kind'] {
+function riderKindForCategory(category: SuitCategory): 'bonus-damage' | 'bonus-guard' {
   return category === 'threat' || category === 'weaken' || category === 'poison'
     ? 'bonus-damage'
     : 'bonus-guard';
@@ -134,5 +205,6 @@ export function riderForCard(card: Pick<CreatureCard, 'specialId'>, category: Su
 export function riderDescription(rider: RiderEffect): string {
   if (rider.kind === 'bonus-damage') return `Also deals ${rider.amount} damage to the target.`;
   if (rider.kind === 'bonus-damage-aoe') return `Also deals ${rider.amount} damage to every alive enemy.`;
+  if (rider.kind === 'bonus-status') return `Also applies ${rider.amount} ${STATUS_DEFS[rider.statusId].name}.`;
   return `Also grants ${rider.amount} Guard.`;
 }

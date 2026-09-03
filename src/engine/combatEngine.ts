@@ -262,6 +262,7 @@ export interface PlayPreview {
   bonusDamage: number;
   bonusGuard: number;
   bonusDamageAoe: number;
+  bonusStatus: StatusBag;
 }
 
 /**
@@ -294,8 +295,8 @@ export function previewPlayerPlay(
   const magnitude = category === 'threat' ? withVulnerable(rawMagnitude, targetStatuses, VULNERABLE_PCT) : rawMagnitude;
   const idSet = new Set(handCardIds);
   const cards = state.playerHand.filter((c): c is CreatureCard => idSet.has(c.id) && c.kind === 'creature');
-  const { bonusDamage, bonusGuard, bonusDamageAoe } = computeRiderTotals(cards);
-  return { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe };
+  const { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus } = computeRiderTotals(cards);
+  return { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus };
 }
 
 function isLegalPlay(
@@ -392,18 +393,20 @@ function computeMagnitude(
   return { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks };
 }
 
-/** Sums the rider each of `cards` fires (see applyRiders) into the same combined bonus-damage/bonus-guard/bonus-damage-aoe totals a resolving play would apply -- shared by the real resolver and any preview built ahead of a play. */
-function computeRiderTotals(cards: CreatureCard[]): { bonusDamage: number; bonusGuard: number; bonusDamageAoe: number } {
+/** Sums the rider each of `cards` fires (see applyRiders) into the same combined bonus-damage/bonus-guard/bonus-damage-aoe/bonus-status totals a resolving play would apply -- shared by the real resolver and any preview built ahead of a play. bonusStatus is a StatusBag rather than a single number since (unlike the other three) its "amount" is spread across whichever StatusId each contributing card's rider names -- a play can only ever mix multiple statusIds if it combines two different named specials of the same suit, but summing into a bag handles that for free instead of assuming just one. */
+function computeRiderTotals(cards: CreatureCard[]): { bonusDamage: number; bonusGuard: number; bonusDamageAoe: number; bonusStatus: StatusBag } {
   let bonusDamage = 0;
   let bonusGuard = 0;
   let bonusDamageAoe = 0;
+  let bonusStatus: StatusBag = {};
   for (const card of cards) {
     const rider = riderForCard(card, suitCategory(card.suit));
     if (rider.kind === 'bonus-damage') bonusDamage += rider.amount;
     else if (rider.kind === 'bonus-guard') bonusGuard += rider.amount;
-    else bonusDamageAoe += rider.amount;
+    else if (rider.kind === 'bonus-damage-aoe') bonusDamageAoe += rider.amount;
+    else bonusStatus = addStacks(bonusStatus, rider.statusId, rider.amount);
   }
-  return { bonusDamage, bonusGuard, bonusDamageAoe };
+  return { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus };
 }
 
 function performPlay(
@@ -616,7 +619,7 @@ function applyRiders(
   let next = state;
   const actorName = actorNameOf(state, actor);
 
-  const { bonusDamage, bonusGuard, bonusDamageAoe } = computeRiderTotals(playedCards);
+  const { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus } = computeRiderTotals(playedCards);
 
   // Single-card plays keep the flavorful source name (a named special's own
   // name, or the plain suit's name) in the log line; multi-card plays fold
@@ -698,6 +701,56 @@ function applyRiders(
         ...next,
         log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${sourceLabel} also ${plural ? 'raise' : 'raises'} Guard to ${newGuard}.`, snapshotOf(next))],
       };
+    }
+  }
+
+  // bonus-status -- same self-vs-opponent targeting rule as applyRelics'
+  // status-on-claim (below): boon/guard/strength suits are self-targeting,
+  // threat/weaken/poison suits land on whatever the play's category effect
+  // already targeted. A play's cards always share one suit, so `category`
+  // here is the same for every entry in the bag.
+  const statusEntries = Object.entries(bonusStatus) as [StatusId, number][];
+  if (statusEntries.length > 0) {
+    const category = suitCategory(playedCards[0].suit);
+    const selfTargeting = category === 'boon' || category === 'guard' || category === 'strength';
+    for (const [statusId, amount] of statusEntries) {
+      const statusName = STATUS_DEFS[statusId].name;
+      if (selfTargeting) {
+        if (actor.kind === 'player') {
+          next = { ...next, playerStatuses: addStacks(next.playerStatuses, statusId, amount) };
+          const total = stacksOf(next.playerStatuses, statusId);
+          next = {
+            ...next,
+            log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', `${sourceLabel} also ${plural ? 'grant' : 'grants'} you +${amount} ${statusName} (${total} stack${total === 1 ? '' : 's'}).`, snapshotOf(next))],
+          };
+        } else {
+          next = updateEnemy(next, actor.instanceId, (e) => ({ ...e, statuses: addStacks(e.statuses, statusId, amount) }));
+          const total = stacksOf(next.enemies.find((e) => e.instanceId === actor.instanceId)!.statuses, statusId);
+          next = {
+            ...next,
+            log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${sourceLabel} also ${plural ? 'grant' : 'grants'} +${amount} ${statusName} (${total} stack${total === 1 ? '' : 's'}).`, snapshotOf(next))],
+          };
+        }
+      } else {
+        if (actor.kind === 'player') {
+          const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
+          if (enemy) {
+            next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, statuses: addStacks(e.statuses, statusId, amount) }));
+            const total = stacksOf(next.enemies.find((e) => e.instanceId === enemy.instanceId)!.statuses, statusId);
+            next = {
+              ...next,
+              log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', `${sourceLabel} also ${plural ? 'inflict' : 'inflicts'} +${amount} ${statusName} on ${enemy.name} (${total} stack${total === 1 ? '' : 's'}).`, snapshotOf(next))],
+            };
+          }
+        } else {
+          next = { ...next, playerStatuses: addStacks(next.playerStatuses, statusId, amount) };
+          const total = stacksOf(next.playerStatuses, statusId);
+          next = {
+            ...next,
+            log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${sourceLabel} also ${plural ? 'inflict' : 'inflicts'} +${amount} ${statusName} on you (${total} stack${total === 1 ? '' : 's'}).`, snapshotOf(next))],
+          };
+        }
+      }
     }
   }
 

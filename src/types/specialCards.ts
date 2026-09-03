@@ -1,4 +1,5 @@
 import type { SuitId } from './suits';
+import type { StatusId } from './status';
 
 /**
  * A rider effect layered on top of a suit's normal category effect when a
@@ -17,12 +18,18 @@ import type { SuitId } from './suits';
  * multi-target sibling -- same threat-only pairing, but a player actor's
  * bonus lands on every alive enemy instead of the one chosen target (an
  * enemy actor, with only one possible target, just treats it as ordinary
- * bonus-damage -- see combatEngine's applyRiders).
+ * bonus-damage -- see combatEngine's applyRiders). bonus-status reuses
+ * relics.ts's status-on-claim targeting rule instead of inventing its own:
+ * threat/weaken/poison suits inflict it on whatever the play's category
+ * effect already targets (must be a debuff -- a buff would help the
+ * opponent), boon/guard/strength suits grant it to whoever played the card
+ * (must be a buff, mirroring bonus-guard's self-only reach).
  */
 export type RiderEffect =
   | { kind: 'bonus-damage'; amount: number }
   | { kind: 'bonus-guard'; amount: number }
-  | { kind: 'bonus-damage-aoe'; amount: number };
+  | { kind: 'bonus-damage-aoe'; amount: number }
+  | { kind: 'bonus-status'; statusId: StatusId; amount: number };
 
 export interface SpecialCardDef {
   id: string;

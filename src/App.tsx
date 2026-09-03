@@ -10,6 +10,7 @@ import { RewardScreen } from './ui/screens/RewardScreen';
 import { DoorChoiceScreen } from './ui/screens/DoorChoiceScreen';
 import { RunEndScreen } from './ui/screens/RunEndScreen';
 import { RunTreeScreen } from './ui/screens/RunTreeScreen';
+import { CompendiumScreen } from './ui/screens/CompendiumScreen';
 import { useLogPlayback } from './ui/hooks/useLogPlayback';
 import './ui/styles.css';
 
@@ -78,13 +79,13 @@ function CombatTopBarStatus() {
   );
 }
 
-type Tab = 'game' | 'tree';
+type Tab = 'game' | 'tree' | 'items';
 
 function App() {
   const [tab, setTab] = useState<Tab>('game');
   return (
     <RunProvider>
-      <div className={tab === 'tree' ? 'app-shell app-shell--full' : 'app-shell'}>
+      <div className={tab === 'game' ? 'app-shell' : 'app-shell app-shell--full'}>
         <div className="tab-bar">
           <button
             type="button"
@@ -100,9 +101,18 @@ function App() {
           >
             Tree (dev)
           </button>
+          <button
+            type="button"
+            className={tab === 'items' ? 'tab-button tab-button--active' : 'tab-button'}
+            onClick={() => setTab('items')}
+          >
+            Items (dev)
+          </button>
           <CombatTopBarStatus />
         </div>
-        {tab === 'game' ? <Router /> : <RunTreeScreen />}
+        {tab === 'game' && <Router />}
+        {tab === 'tree' && <RunTreeScreen />}
+        {tab === 'items' && <CompendiumScreen />}
       </div>
     </RunProvider>
   );

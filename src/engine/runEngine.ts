@@ -280,9 +280,12 @@ export function resolveDeckAction(run: RunState, cardId: string): RunState {
     const copy: CreatureCard = { ...card, id: `${card.id}-dup-${deckActionDupCounter++}` };
     deck = [...run.deck, copy];
   } else {
-    // upgrade (Promote) -- exactly one named special per suit today (see
-    // config/specialCards.ts's SPECIAL_CARD_DEFS), so this is deterministic,
-    // no rng draw needed.
+    // upgrade (Promote) -- every suit now carries 2 named specials (see
+    // config/specialCards.ts's SPECIAL_CARD_DEFS), but this always promotes
+    // to the suit's first-listed one (its starter-deck special, e.g. Wildfire
+    // over Cinder Storm for Ember), deterministically, no rng draw. The
+    // suit's other special(s) stay reward/shop-pool only, same as they
+    // already were before Upgrade could ever produce them either way.
     const special = specialCardsBySuit(card.suit)[0];
     deck = run.deck.map((c) => (c.id === cardId ? { ...c, specialId: special.id } : c));
   }

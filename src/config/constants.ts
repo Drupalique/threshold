@@ -9,8 +9,8 @@ import { specialCardById } from './specialCards';
 
 export const SUIT_DEFINITIONS: SuitDef[] = [
   { id: 'wolf', name: 'Wolf', category: 'threat', displayColor: '#c0392b' },
-  { id: 'ember', name: 'Ember', category: 'threat', displayColor: '#2980b9' },
-  { id: 'rot', name: 'Rot', category: 'threat', displayColor: '#2471a3' },
+  { id: 'ember', name: 'Ember', category: 'threat', displayColor: '#e67e22' },
+  { id: 'rot', name: 'Rot', category: 'threat', displayColor: '#7f7326' },
   { id: 'spider', name: 'Spider', category: 'threat', displayColor: '#a93226' },
   { id: 'grace', name: 'Grace', category: 'boon', displayColor: '#d4ac0d' },
   { id: 'ward', name: 'Ward', category: 'guard', displayColor: '#16a085' },
