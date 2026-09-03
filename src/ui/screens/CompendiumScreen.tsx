@@ -1,6 +1,6 @@
 import type { Card, CreatureCard } from '../../types/cards';
 import { SUIT_DEFINITIONS, QUAKE_BONUS_PLAYS, SHOP_TRANSFORM_PRICE, SHOP_DUPLICATE_PRICE, SHOP_UPGRADE_PRICE } from '../../config/constants';
-import { specialCardsBySuit, basicRiderForCategory, riderDescription } from '../../config/specialCards';
+import { specialCardsBySuit, riderDescription } from '../../config/specialCards';
 import { specialCard } from '../../config/cardHelpers';
 import { POTION_DEFS } from '../../config/potions';
 import { RELIC_DEFS } from '../../config/relics';
@@ -54,7 +54,6 @@ export function CompendiumScreen() {
         <div className="compendium-grid">
           {SUIT_DEFINITIONS.map((suitDef) => {
             const plainCard: CreatureCard = { id: `compendium-plain-${suitDef.id}`, kind: 'creature', suit: suitDef.id };
-            const basicRider = basicRiderForCategory(suitDef.category);
             const specials = specialCardsBySuit(suitDef.id);
             return (
               <div key={suitDef.id} className="compendium-group">
@@ -65,7 +64,7 @@ export function CompendiumScreen() {
                 </div>
                 <div className="compendium-item-row">
                   <StaticCard card={plainCard} />
-                  <p className="compendium-item-desc">Plain -- {riderDescription(basicRider)}</p>
+                  <p className="compendium-item-desc">Plain -- no rider, just the suit's base points.</p>
                 </div>
                 {specials.map((def) => (
                   <div className="compendium-item-row" key={def.id}>

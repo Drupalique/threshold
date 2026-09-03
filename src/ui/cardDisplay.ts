@@ -21,6 +21,6 @@ export function cardChipTitle(card: CreatureCard): string {
   // Always names the suit even for a special, so hovering makes the
   // suit relationship explicit, not just implied by the shared icon.
   if (specialDef) return `${icon} ${specialDef.name} (${suitDef.name} suit) -- ${specialDef.description}`;
-  const rider = riderForCard(card, suitDef.category);
-  return `${icon} ${suitDef.name} -- ${riderDescription(rider)}`;
+  const rider = riderForCard(card);
+  return rider ? `${icon} ${suitDef.name} -- ${riderDescription(rider)}` : `${icon} ${suitDef.name}`;
 }

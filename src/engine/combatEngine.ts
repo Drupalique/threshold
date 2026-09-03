@@ -406,10 +406,12 @@ function computeMagnitude(
  * kinds) its "amount" is spread across whichever StatusId each contributing
  * card's rider names -- a play can only ever mix multiple statusIds if it
  * combines two different named specials of the same suit, but summing into
- * a bag handles that for free instead of assuming just one. bonus-per-card
- * folds straight into bonusDamage/bonusGuard (routed the same threat/
- * weaken/poison-vs-rest way basicRiderForCategory already splits) rather
- * than getting its own return field, since `tableCountAfterPlay` scaling is
+ * a bag handles that for free instead of assuming just one. Only cards with
+ * a specialId contribute anything here (riderForCard returns undefined for
+ * a plain card, so it's skipped). bonus-per-card folds straight into
+ * bonusDamage/bonusGuard (routed the same threat/weaken/poison-vs-rest way
+ * every other targeted rider is) rather than getting its own return field,
+ * since `tableCountAfterPlay` scaling is
  * the only thing that makes it different from bonus-damage/bonus-guard --
  * once scaled, it's the same bucket, so every downstream consumer (the
  * resolver's actual damage/guard application, the UI preview's combined
@@ -427,8 +429,9 @@ function computeRiderTotals(
   let discardAmount = 0;
   let bonusPlays = 0;
   for (const card of cards) {
+    const rider = riderForCard(card);
+    if (!rider) continue;
     const category = suitCategory(card.suit);
-    const rider = riderForCard(card, category);
     const targetsDamage = category === 'threat' || category === 'weaken' || category === 'poison';
     if (rider.kind === 'bonus-damage') bonusDamage += rider.amount;
     else if (rider.kind === 'bonus-guard') bonusGuard += rider.amount;
@@ -638,10 +641,10 @@ function performPlay(
  * after the suit's own category effect (and its log line) has fully
  * resolved, and never touches the magnitude formula above (bonus-per-card
  * scales by tableCountAfterPlay, but still lands as a post-hoc add, same as
- * every other rider). Every creature card carries a rider now: a named
- * special's own (bigger) rider if it has a specialId, otherwise its suit's
- * small basic rider (config/specialCards.ts's basicRiderForCategory). A
- * play's cards always share one suit, so they always share one rider kind
+ * every other rider). Only a named-special card (specialId set) fires a
+ * rider at all -- a plain card is nothing but its suit's base multiplicative
+ * points (see config/specialCards.ts's riderForCard). A play's cards always
+ * share one suit, so any riders they do fire always share one rider kind
  * too -- summed into a single combined bump per resource and one log line
  * per resource, rather than one line per card, since a big play can commit
  * many cards at once. bonus-damage reuses the same target the category

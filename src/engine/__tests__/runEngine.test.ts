@@ -523,7 +523,10 @@ describe('shop rooms', () => {
     let run = createNewRun(3);
     run = startFirstRoom(run);
     run = enterShopRoom(run);
-    run = { ...run, pendingDeckAction: { action: 'transform' } };
+    // The real starter deck is basics-only (see constants.ts's
+    // buildStarterDeck), so swap in the full-roster STARTER_DECK fixture to
+    // get a specialId card to target.
+    run = { ...run, deck: STARTER_DECK, pendingDeckAction: { action: 'transform' } };
     const target = run.deck.find((c) => c.kind === 'creature' && c.specialId)!;
 
     run = resolveDeckAction(run, target.id);
@@ -557,7 +560,9 @@ describe('shop rooms', () => {
     let run = createNewRun(3);
     run = startFirstRoom(run);
     run = enterShopRoom(run);
-    run = { ...run, pendingDeckAction: { action: 'upgrade' } };
+    // The real starter deck is basics-only, so swap in the full-roster
+    // STARTER_DECK fixture, which has both plain and specialId cards.
+    run = { ...run, deck: STARTER_DECK, pendingDeckAction: { action: 'upgrade' } };
     const plain = run.deck.find((c) => c.kind === 'creature' && !c.specialId)!;
 
     const upgraded = resolveDeckAction(run, plain.id);

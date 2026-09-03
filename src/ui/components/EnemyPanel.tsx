@@ -26,8 +26,8 @@ export function StatusBadges({ statuses }: { statuses: Partial<Record<StatusId, 
 // not the clickable CardChip <button>, since an enemy card here can itself
 // already be a <button> (when targetable) and nesting interactive elements
 // inside a <button> is invalid HTML. Shares CardChip's face/style/title so a
-// named special or a basic rider reads identically for an enemy's hand as it
-// does for the player's own.
+// named special reads identically for an enemy's hand as it does for the
+// player's own.
 function StaticCardChip({ card }: { card: CreatureCard }) {
   const classes = ['card-chip', 'card-chip--static', card.specialId ? 'card-chip--special' : ''].filter(Boolean).join(' ');
   return (

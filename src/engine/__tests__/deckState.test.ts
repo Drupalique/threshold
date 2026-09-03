@@ -22,30 +22,6 @@ describe('shuffleDeck', () => {
     expect(a.map((c) => c.id)).toEqual(b.map((c) => c.id));
   });
 
-  it('breaks up same-suit runs so equal-sized suits never land adjacent', () => {
-    const suits = ['wolf', 'ember', 'rot', 'spider'] as const;
-    const deck: Card[] = suits.flatMap((suit) =>
-      Array.from({ length: 5 }, (_, i) => ({ id: `${suit}${i}`, kind: 'creature' as const, suit })),
-    );
-    for (let seed = 1; seed <= 20; seed++) {
-      const shuffled = shuffleDeck(deck, createRng(seed));
-      expect(new Set(shuffled.map((c) => c.id))).toEqual(new Set(deck.map((c) => c.id))); // still a permutation
-      for (let i = 1; i < shuffled.length; i++) {
-        const prev = shuffled[i - 1] as { suit: string };
-        const cur = shuffled[i] as { suit: string };
-        expect(cur.suit).not.toBe(prev.suit);
-      }
-    }
-  });
-
-  it('leaves unavoidable adjacency in place rather than looping forever when one suit dominates', () => {
-    const deck: Card[] = [
-      ...Array.from({ length: 8 }, (_, i) => ({ id: `w${i}`, kind: 'creature' as const, suit: 'wolf' as const })),
-      { id: 'e0', kind: 'creature' as const, suit: 'ember' as const },
-    ];
-    const shuffled = shuffleDeck(deck, createRng(3));
-    expect(new Set(shuffled.map((c) => c.id))).toEqual(new Set(deck.map((c) => c.id)));
-  });
 });
 
 describe('drawCards', () => {

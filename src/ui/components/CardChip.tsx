@@ -15,12 +15,12 @@ import { cardChipStyle, cardChipTitle } from '../cardDisplay';
 export function CardFace({ card, showRider = true }: { card: CreatureCard; showRider?: boolean }) {
   const suitDef = SUIT_DEFINITIONS.find((s) => s.id === card.suit)!;
   const specialDef = card.specialId ? specialCardById(card.specialId) : undefined;
-  const rider = riderForCard(card, suitDef.category);
+  const rider = riderForCard(card);
   return (
     <>
       <span className="card-chip-icon" aria-hidden="true">{suitIcon(card.suit)}</span>
       <span className="card-chip-label">{specialDef ? specialDef.name : suitDef.name}</span>
-      {showRider && <span className="card-chip-rider">{riderBadgeText(rider, suitDef.category)}</span>}
+      {showRider && rider && <span className="card-chip-rider">{riderBadgeText(rider, suitDef.category)}</span>}
     </>
   );
 }

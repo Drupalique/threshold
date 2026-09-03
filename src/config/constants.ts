@@ -242,53 +242,54 @@ export const DOOR_TREE_VIEW_SCALE = 2;
 
 export const RUN_MAX_DEPTH = 10;
 
-// How many of the 9 suits a run's starter deck draws from (see runEngine.ts's
-// pickStarterSuits: 1 guaranteed threat suit, the single guard suit, and
-// STARTER_SUIT_COUNT-2 more drawn from the remaining boon/weaken/poison/
-// strength suits) -- deliberately fewer than the full roster so an early
-// hand actually clusters on the suits it has, instead of a 7-card hand from
-// a 9-suit deck rarely matching any given room's 1-2 active threat suits
-// (see GAME_DESIGN.md). Reward/shop offers stay unrestricted (rewardGenerator
-// .ts's REWARD_SUITS spans all 9) -- only the *starting point* is narrowed,
-// so a player grows back into suit variety at their own pace.
-export const STARTER_SUIT_COUNT = 4;
+// How many distinct threat suits a run's starter deck draws attack cards
+// from (see runEngine.ts's pickStarterAttackSuits) -- paired with the single
+// guaranteed guard suit, this is the whole starting suit roster. Kept small
+// and fixed so a brand-new hand is nothing but plain, easy-to-read basics:
+// no named specials, no boon/weaken/poison/strength "taste" cards to parse
+// on turn one. Reward/shop offers stay unrestricted (rewardGenerator.ts's
+// REWARD_SUITS spans all 9) -- only the *starting point* is this narrow, so
+// a player grows into suit variety and specials at their own pace.
+export const STARTER_ATTACK_SUIT_COUNT = 2;
 
-// Per-suit starter card counts by category -- threat and guard are levelled
-// at the same count (STARTER_SUIT_ATTACK_BLOCK_COUNT) so the guaranteed
-// threat suit and the guaranteed guard suit each land around 5 cards
-// (4 plain + 1 named special), giving the starter deck's attack and block
-// piles rough parity -- there are 4 threat suits to guard's 1, so without
-// this the lone guard suit would always be badly outweighted. Every other
-// category (boon/weaken/poison/strength) starts with nothing but its named
-// special, same "light taste" as before.
-const STARTER_SUIT_ATTACK_BLOCK_COUNT = 4;
-function starterPlainCountForCategory(category: SuitDef['category']): number {
-  if (category === 'threat' || category === 'guard') return STARTER_SUIT_ATTACK_BLOCK_COUNT;
-  return 0;
-}
+// How many plain copies of each starting suit land in the deck -- the same
+// count for the guard suit and for each attack suit, so a fresh deck reads
+// as "3 Ward, 3 of one attack suit, 3 of another" with no suit outweighing
+// another at the start.
+export const STARTER_CARDS_PER_SUIT = 3;
 
-// Builds a starter deck for a chosen subset of suits -- each suit contributes
-// its category's plain-card count (starterPlainCountForCategory) plus one
-// copy of its first named special (specialCardsBySuit's authoring order),
-// same "swap one generic copy for the signature card" rule the old fixed
-// STARTER_DECK used.
-export function buildStarterDeck(suits: SuitId[]): CreatureCard[] {
-  const cards: CreatureCard[] = [];
-  for (const suitId of suits) {
-    const suitDef = SUIT_DEFINITIONS.find((s) => s.id === suitId)!;
-    const plainCount = starterPlainCountForCategory(suitDef.category);
-    cards.push(...cardCopies(suitId, plainCount, 'starter'));
-    const [firstSpecial] = specialCardsBySuit(suitId);
-    if (firstSpecial) cards.push(specialCard(firstSpecial, 'starter'));
+// Builds a run's starter deck: STARTER_CARDS_PER_SUIT plain copies of the
+// guard suit plus STARTER_CARDS_PER_SUIT plain copies of each given attack
+// suit. Deliberately all cardCopies (see cardHelpers.ts) -- no specialCard
+// swap-ins -- so the starting deck is nothing but basics.
+export function buildStarterDeck(attackSuits: SuitId[]): CreatureCard[] {
+  const cards: CreatureCard[] = [...cardCopies(GUARD_SUIT, STARTER_CARDS_PER_SUIT, 'starter')];
+  for (const suitId of attackSuits) {
+    cards.push(...cardCopies(suitId, STARTER_CARDS_PER_SUIT, 'starter'));
   }
   return cards;
 }
 
-// The full-roster starter deck (all 9 suits) -- used as a fixture wherever a
-// representative sample deck is needed outside an actual run (tests, dev
-// tooling), not by createNewRun itself, which narrows to STARTER_SUIT_COUNT
-// suits via runEngine.ts's pickStarterSuits.
-export const STARTER_DECK: CreatureCard[] = buildStarterDeck(SUIT_DEFINITIONS.map((s) => s.id));
+// The full-roster sample deck (all 9 suits, each with its category's plain
+// count plus its first named special) -- used as a fixture wherever a large,
+// representative deck is needed outside an actual run (tests, dev tooling
+// like the shop-capacity check in runEngine.test.ts), not by createNewRun
+// itself, which uses the narrower, specials-free buildStarterDeck above.
+const SAMPLE_SUIT_ATTACK_BLOCK_COUNT = 4;
+function samplePlainCountForCategory(category: SuitDef['category']): number {
+  if (category === 'threat' || category === 'guard') return SAMPLE_SUIT_ATTACK_BLOCK_COUNT;
+  return 0;
+}
+export const STARTER_DECK: CreatureCard[] = SUIT_DEFINITIONS.flatMap((suitDef) => {
+  const cards: CreatureCard[] = cardCopies(
+    suitDef.id,
+    samplePlainCountForCategory(suitDef.category),
+    'starter',
+  );
+  const [firstSpecial] = specialCardsBySuit(suitDef.id);
+  if (firstSpecial) cards.push(specialCard(firstSpecial, 'starter'));
+  return cards;
+});
 
 // --- Rewards ------------------------------------------------------------
 

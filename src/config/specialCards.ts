@@ -1,4 +1,4 @@
-import type { SuitId, SuitCategory } from '../types/suits';
+import type { SuitId } from '../types/suits';
 import type { SpecialCardDef, RiderEffect } from '../types/specialCards';
 import type { CreatureCard } from '../types/cards';
 import { STATUS_DEFS } from '../types/status';
@@ -279,28 +279,9 @@ export function specialCardsBySuit(suit: SuitId): SpecialCardDef[] {
   return SPECIAL_CARD_DEFS.filter((d) => d.suit === suit);
 }
 
-// --- Basic (non-named) riders --------------------------------------------
-// Every plain suited copy now carries a small rider too, not just the one
-// named special per suit -- deliberately smaller than RIDER_AMOUNT so a
-// signature card still reads as a step up rather than just a name swap.
-export const BASIC_RIDER_AMOUNT = 1;
-
-// Same threat/weaken/poison-vs-boon/guard/strength split SPECIAL_CARD_DEFS
-// already follows by hand above: categories that resolve against a target
-// get a damage rider, self-targeting categories get a guard rider.
-function riderKindForCategory(category: SuitCategory): 'bonus-damage' | 'bonus-guard' {
-  return category === 'threat' || category === 'weaken' || category === 'poison'
-    ? 'bonus-damage'
-    : 'bonus-guard';
-}
-
-export function basicRiderForCategory(category: SuitCategory): RiderEffect {
-  return { kind: riderKindForCategory(category), amount: BASIC_RIDER_AMOUNT };
-}
-
-/** The rider a given creature card actually fires when played from a hand: its named special's rider if tagged, otherwise its suit's baseline basic rider. Callers already have the suit's category on hand (from SUIT_DEFINITIONS) rather than re-deriving it here, to avoid a config/constants import cycle. */
-export function riderForCard(card: Pick<CreatureCard, 'specialId'>, category: SuitCategory): RiderEffect {
-  return card.specialId ? specialCardById(card.specialId).rider : basicRiderForCategory(category);
+/** The rider a given creature card fires when played from a hand, if any: its named special's rider if tagged, otherwise undefined -- a plain card is nothing but its suit's base multiplicative points, no rider at all. */
+export function riderForCard(card: Pick<CreatureCard, 'specialId'>): RiderEffect | undefined {
+  return card.specialId ? specialCardById(card.specialId).rider : undefined;
 }
 
 export function riderDescription(rider: RiderEffect): string {

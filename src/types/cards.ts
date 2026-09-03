@@ -5,14 +5,13 @@ export interface CreatureCard {
   kind: 'creature';
   suit: SuitId;
   // References a SpecialCardDef (src/config/specialCards.ts) -- absent means
-  // a plain, fungible copy of the suit. Every creature card fires a rider
-  // effect when it's part of the hand cards actually committed to a play
-  // (see combatEngine.ts's applyRiders): a specialId'd card fires its named
-  // special's own (bigger) rider, a plain one fires its suit's small basic
-  // rider (config/specialCards.ts's basicRiderForCategory) -- either way it
-  // still joins its suit's table set and multiplier like any other copy.
-  // Never present on a table card -- riders only apply from the hand at play
-  // time, not from cards sitting on the table.
+  // a plain, fungible copy of the suit, which fires no rider at all: just
+  // its suit's base multiplicative points, same as any other copy in the
+  // set. Only a specialId'd card fires a rider effect when it's part of the
+  // hand cards actually committed to a play (see combatEngine.ts's
+  // applyRiders / config/specialCards.ts's riderForCard). Never present on a
+  // table card -- riders only apply from the hand at play time, not from
+  // cards sitting on the table.
   specialId?: string;
 }
 
