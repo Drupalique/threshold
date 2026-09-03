@@ -5,7 +5,7 @@ import type { RelicDef } from '../types/relics';
 import type { PotionDef } from '../types/potions';
 import type { Rng } from './rng';
 import { uniformPick, weightedPick, pickDistinct } from './weightedPick';
-import { SPECIAL_CARD_DEFS } from '../config/specialCards';
+import { SPECIAL_CARD_DEFS, RARITY_WEIGHT } from '../config/specialCards';
 import { RELIC_DEFS } from '../config/relics';
 import { POTION_DEFS } from '../config/potions';
 import {
@@ -42,6 +42,14 @@ import {
 export const REWARD_SUITS: SuitId[] = [...THREAT_SUITS, BOON_SUIT, GUARD_SUIT, WEAKEN_SUIT, POISON_SUIT, STRENGTH_SUIT];
 
 type RewardCategory = 'suit' | 'special' | 'quake' | 'cleave' | 'relic' | 'potion';
+
+// Rolls which SPECIAL_CARD_DEFS entry a 'special' reward/shop slot actually
+// resolves to, skewed by rarity (RARITY_WEIGHT) instead of a flat
+// uniformPick -- shared by the reward screen and the shop's twin slot below
+// so both draw from the same odds.
+function pickSpecialCardDef(rng: Rng) {
+  return weightedPick(rng, SPECIAL_CARD_DEFS.map((d) => ({ weight: RARITY_WEIGHT[d.rarity ?? 'common'], value: d })));
+}
 
 /**
  * A reward's suit-slot pick, biased toward the just-cleared room's own
@@ -115,7 +123,7 @@ export function generateRewardOptions(
     } else if (category === 'cleave') {
       options.push({ id, optionType: 'card', card: { id, kind: 'cleave' } });
     } else if (category === 'special') {
-      const def = uniformPick(rng, SPECIAL_CARD_DEFS);
+      const def = pickSpecialCardDef(rng);
       options.push({ id, optionType: 'card', card: { id, kind: 'creature', suit: def.suit, specialId: def.id } });
     } else if (category === 'relic') {
       const relic = uniformPick(rng, offerableRelics);
@@ -201,7 +209,7 @@ export function generateShopOptions(rng: Rng, heldRelics: RelicDef[], heldPotion
     } else if (category === 'cleave') {
       options.push({ id, optionType: 'card', price: SHOP_CARD_PRICE, card: { id, kind: 'cleave' } });
     } else if (category === 'special') {
-      const def = uniformPick(rng, SPECIAL_CARD_DEFS);
+      const def = pickSpecialCardDef(rng);
       options.push({ id, optionType: 'card', price: SHOP_CARD_PRICE, card: { id, kind: 'creature', suit: def.suit, specialId: def.id } });
     } else if (category === 'relic') {
       const relic = uniformPick(rng, offerableRelics);

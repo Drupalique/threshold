@@ -53,9 +53,9 @@ function riderSharesResource(category: PlayPreview['category']): boolean {
   return category === 'threat' || category === 'guard';
 }
 
-/** One line describing this play's full effect: the base magnitude (with a note for any Strength/Weaken folded into it), plus its rider bonus -- combined into one total when the rider lands on the same resource, called out separately when it doesn't (see riderSharesResource). A bonus-status rider is always its own separate note (never combinable into `magnitude`, unlike bonus-damage/bonus-guard) so it's appended after whichever of those two branches applies. */
+/** One line describing this play's full effect: the base magnitude (with a note for any Strength/Weaken folded into it), plus its rider bonus -- combined into one total when the rider lands on the same resource, called out separately when it doesn't (see riderSharesResource). bonus-status/draw/discard/bonus-plays are always their own separate notes (never combinable into `magnitude`, unlike bonus-damage/bonus-guard/bonus-per-card) so they're appended after whichever of those two branches applies. */
 function describePreview(preview: PlayPreview, selectedCount: number): string {
-  const { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus } = preview;
+  const { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus, drawAmount, discardAmount, bonusPlays } = preview;
   const resourceLabel = RESOURCE_LABEL[category];
   const buffNotes = [
     strengthStacks > 0 ? `+${strengthStacks} from Strength` : null,
@@ -66,21 +66,24 @@ function describePreview(preview: PlayPreview, selectedCount: number): string {
 
   const core = `${selectedCount} x ${tableCountAfterPlay} = ${magnitude} ${resourceLabel}${buffSuffix}`;
 
-  const statusNotes = (Object.entries(bonusStatus) as [StatusId, number][])
+  const extraNotes = (Object.entries(bonusStatus) as [StatusId, number][])
     .filter(([, amount]) => amount > 0)
-    .map(([statusId, amount]) => `+${amount} ${STATUS_DEFS[statusId].name}`);
-  const statusSuffix = statusNotes.length > 0 ? ` -- rider also applies ${statusNotes.join(', ')}` : '';
+    .map(([statusId, amount]) => `applies +${amount} ${STATUS_DEFS[statusId].name}`);
+  if (drawAmount > 0) extraNotes.push(`draws ${drawAmount} card${drawAmount === 1 ? '' : 's'}`);
+  if (discardAmount > 0) extraNotes.push(`makes the target discard ${discardAmount} card${discardAmount === 1 ? '' : 's'}`);
+  if (bonusPlays > 0) extraNotes.push(`grants +${bonusPlays} bonus play${bonusPlays === 1 ? '' : 's'}`);
+  const extraSuffix = extraNotes.length > 0 ? ` -- rider also ${extraNotes.join(', ')}` : '';
 
   const damageBonus = bonusDamage + bonusDamageAoe;
   const bonus = damageBonus > 0 ? damageBonus : bonusGuard > 0 ? bonusGuard : 0;
-  if (bonus === 0) return `${core}${statusSuffix}`;
+  if (bonus === 0) return `${core}${extraSuffix}`;
 
   if (riderSharesResource(category)) {
     const aoeSuffix = bonusDamageAoe > 0 ? ` (${bonusDamageAoe} splashes to every other enemy)` : '';
-    return `${core} +${bonus} rider${aoeSuffix} = ${magnitude + bonus} ${resourceLabel} total${statusSuffix}`;
+    return `${core} +${bonus} rider${aoeSuffix} = ${magnitude + bonus} ${resourceLabel} total${extraSuffix}`;
   }
   const bonusLabel = damageBonus > 0 ? 'damage' : 'Guard';
-  return `${core} -- rider also adds +${bonus} ${bonusLabel}${statusSuffix}`;
+  return `${core} -- rider also adds +${bonus} ${bonusLabel}${extraSuffix}`;
 }
 
 export function PlayControls({

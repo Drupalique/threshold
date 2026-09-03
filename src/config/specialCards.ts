@@ -27,6 +27,32 @@ const AOE_RIDER_AMOUNT = 2;
 // different resource, not the suit's own headline number.
 const STATUS_RIDER_AMOUNT = 2;
 
+// Per-card-in-the-set rider amount (types/specialCards.ts's bonus-per-card)
+// -- kept to 1 since it's multiplied by the suit's whole table-set size at
+// resolution (combatEngine's tableCountAfterPlay), not a flat add like
+// RIDER_AMOUNT; a late claim into a big set already does the scaling work.
+const PER_CARD_RIDER_AMOUNT = 1;
+
+// Draw/discard/bonus-plays rider amounts -- first-cut single-stack numbers,
+// same "one tunable knob" reasoning as RIDER_AMOUNT above.
+const DRAW_RIDER_AMOUNT = 1;
+const DISCARD_RIDER_AMOUNT = 1;
+const BONUS_PLAYS_RIDER_AMOUNT = 1;
+
+// Skews which SPECIAL_CARD_DEFS entry a reward/shop "special" slot actually
+// lands on (see rewardGenerator.ts's two weightedPick(rng, SPECIAL_CARD_DEFS
+// .map(...)) call sites) -- an absent `rarity` on a def reads as 'common',
+// so every special added before rarity existed keeps its original odds
+// unchanged. 'rare' is deliberately well below 1 rather than near-zero: the
+// four new bonus-per-card/bonus-plays specials below are strong, not
+// run-defining, and the reward pool is already small enough (SPECIAL_
+// CARD_DEFS has under 20 entries) that a token weight would make them feel
+// like dead weight in the pool instead of a genuine rare find.
+export const RARITY_WEIGHT: Record<'common' | 'rare', number> = {
+  common: 1,
+  rare: 0.3,
+};
+
 export const SPECIAL_CARD_DEFS: SpecialCardDef[] = [
   {
     id: 'alpha-wolf',
@@ -166,6 +192,81 @@ export const SPECIAL_CARD_DEFS: SpecialCardDef[] = [
     description: `Also grants yourself ${STATUS_RIDER_AMOUNT} ${STATUS_DEFS.regen.name}.`,
     rider: { kind: 'bonus-status', statusId: 'regen', amount: STATUS_RIDER_AMOUNT },
   },
+
+  // A third special for 8 of the 9 suits (Venom keeps its 2), one pair per
+  // new mechanic, all reward/shop-pool only like every special above it.
+  // bonus-per-card is deliberately 'rare' (RARITY_WEIGHT) -- unlike every
+  // other rider here, its payout scales with the suit's whole table-set
+  // size at resolution, not a flat number, so it can swing far harder than
+  // a common special in a late, big claim.
+  {
+    id: 'direwolf-alpha',
+    suit: 'wolf',
+    name: 'Direwolf Alpha',
+    description: `Also deals ${PER_CARD_RIDER_AMOUNT} damage per card in the set to the target.`,
+    rider: { kind: 'bonus-per-card', amount: PER_CARD_RIDER_AMOUNT },
+    rarity: 'rare',
+  },
+  {
+    id: 'bulwark-colossus',
+    suit: 'ward',
+    name: 'Bulwark Colossus',
+    description: `Also grants ${PER_CARD_RIDER_AMOUNT} Guard per card in the set.`,
+    rider: { kind: 'bonus-per-card', amount: PER_CARD_RIDER_AMOUNT },
+    rarity: 'rare',
+  },
+  // draw -- always benefits whoever played the card, any suit category.
+  {
+    id: 'fortunes-grace',
+    suit: 'grace',
+    name: "Fortune's Grace",
+    description: `Also draws ${DRAW_RIDER_AMOUNT} card.`,
+    rider: { kind: 'draw', amount: DRAW_RIDER_AMOUNT },
+  },
+  {
+    id: 'carrion-feast',
+    suit: 'rot',
+    name: 'Carrion Feast',
+    description: `Also draws ${DRAW_RIDER_AMOUNT} card.`,
+    rider: { kind: 'draw', amount: DRAW_RIDER_AMOUNT },
+  },
+  // discard -- only paired with threat/weaken/poison suits (same reasoning
+  // as bonus-damage), so the opponent is always well-defined: the play's
+  // own target for a player actor, the player for an enemy actor.
+  {
+    id: 'silk-ambush',
+    suit: 'spider',
+    name: 'Silk Ambush',
+    description: `Also forces the target to discard ${DISCARD_RIDER_AMOUNT} card.`,
+    rider: { kind: 'discard', amount: DISCARD_RIDER_AMOUNT },
+  },
+  {
+    id: 'mind-rot',
+    suit: 'hex',
+    name: 'Mind Rot',
+    description: `Also forces the target to discard ${DISCARD_RIDER_AMOUNT} card.`,
+    rider: { kind: 'discard', amount: DISCARD_RIDER_AMOUNT },
+  },
+  // bonus-plays -- Quake's rider-sized cousin: a suited card that also tops
+  // up state.playsRemaining, instead of Quake's dedicated free-action slot.
+  // Rare for the same reason Quake itself is gated low (QUAKE_REWARD_RATIO)
+  // -- extra plays are one of the strongest things a card can grant.
+  {
+    id: 'flash-ignition',
+    suit: 'ember',
+    name: 'Flash Ignition',
+    description: `Also grants ${BONUS_PLAYS_RIDER_AMOUNT} bonus play this turn.`,
+    rider: { kind: 'bonus-plays', amount: BONUS_PLAYS_RIDER_AMOUNT },
+    rarity: 'rare',
+  },
+  {
+    id: 'overdrive',
+    suit: 'vigor',
+    name: 'Overdrive',
+    description: `Also grants ${BONUS_PLAYS_RIDER_AMOUNT} bonus play this turn.`,
+    rider: { kind: 'bonus-plays', amount: BONUS_PLAYS_RIDER_AMOUNT },
+    rarity: 'rare',
+  },
 ];
 
 export function specialCardById(id: string): SpecialCardDef {
@@ -206,5 +307,9 @@ export function riderDescription(rider: RiderEffect): string {
   if (rider.kind === 'bonus-damage') return `Also deals ${rider.amount} damage to the target.`;
   if (rider.kind === 'bonus-damage-aoe') return `Also deals ${rider.amount} damage to every alive enemy.`;
   if (rider.kind === 'bonus-status') return `Also applies ${rider.amount} ${STATUS_DEFS[rider.statusId].name}.`;
+  if (rider.kind === 'bonus-per-card') return `Also adds ${rider.amount} per card in the set.`;
+  if (rider.kind === 'draw') return `Also draws ${rider.amount} card${rider.amount === 1 ? '' : 's'}.`;
+  if (rider.kind === 'discard') return `Also forces the target to discard ${rider.amount} card${rider.amount === 1 ? '' : 's'}.`;
+  if (rider.kind === 'bonus-plays') return `Also grants ${rider.amount} bonus play${rider.amount === 1 ? '' : 's'}.`;
   return `Also grants ${rider.amount} Guard.`;
 }

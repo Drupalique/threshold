@@ -1753,3 +1753,94 @@ describe('Cleave setup card (AOE tier 2)', () => {
     expect(state.cleaveActive).toBe(false); // cleared once the threat play resolved
   });
 });
+
+describe('bonus-per-card rider (rare, scales with the table set)', () => {
+  it('adds amount * tableCountAfterPlay on top of the ordinary magnitude, not just a flat bonus', () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [
+        { id: 't1', suit: 'wolf', ownerId: 'room' },
+        { id: 't2', suit: 'wolf', ownerId: 'room' },
+        { id: 't3', suit: 'wolf', ownerId: 'room' },
+      ],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'wolf', specialId: 'direwolf-alpha' }],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'wolf', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    // magnitude: 3 already on table + 1 played = 4 x 1 = 4 damage.
+    // bonus-per-card: 1 * tableCountAfterPlay(4) = 4 more damage, not just +1.
+    expect(next.enemies[0].hp).toBe(30 - 4 - 4);
+  });
+});
+
+describe('draw rider', () => {
+  it("draws into the acting side's own hand from their own draw pile", () => {
+    const room = makeRoom();
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'grace', specialId: 'fortunes-grace' }],
+      drawPile: [{ id: 'd1', kind: 'creature', suit: 'wolf' }],
+      discardPile: [],
+    });
+
+    const next = applyCombatAction(state, { type: 'PLAY_SET', suit: 'grace', handCardIds: ['ph1'] }, rng);
+
+    expect(next.playerHand.some((c) => c.id === 'd1')).toBe(true);
+    expect(next.drawPile).toHaveLength(0);
+    expect(next.log.some((l) => l.message.includes('draws 1 card'))).toBe(true);
+  });
+});
+
+describe('discard rider', () => {
+  it("forces the play's target to discard from their own hand", () => {
+    const room = makeRoom({ params: { ...makeRoom().params, threatSuits: ['spider'] } });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'spider', specialId: 'silk-ambush' }],
+      // initCombat deals each enemy its own opening hand from its EnemyDef's
+      // deck, overwriting whatever `hand` makeEnemy() was given -- so the
+      // hand this test actually needs to discard from has to be set here,
+      // at the CombatState level, same as playerHand above.
+      enemies: [makeEnemy({ hp: 30, hpMax: 30, hand: [{ id: 'eh1', kind: 'creature', suit: 'wolf' }] })],
+    });
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'spider', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    expect(next.enemies[0].hand).toHaveLength(0);
+    expect(next.enemies[0].discardPile.some((c) => c.id === 'eh1')).toBe(true);
+    expect(next.log.some((l) => l.message.includes('discard'))).toBe(true);
+  });
+});
+
+describe('bonus-plays rider', () => {
+  it("tops up state.playsRemaining, offsetting PLAY_SET's own -1 for the play it was part of", () => {
+    const room = makeRoom({ enemies: [makeEnemy({ hp: 30, hpMax: 30 })] });
+    const rng = createRng(1);
+    const state = makeCombat(room, rng, 30, 30, {
+      table: [],
+      playerHand: [{ id: 'ph1', kind: 'creature', suit: 'ember', specialId: 'flash-ignition' }],
+    });
+    expect(state.playsRemaining).toBe(PLAYS_PER_TURN_BASE);
+
+    const next = applyCombatAction(
+      state,
+      { type: 'PLAY_SET', suit: 'ember', targetInstanceId: 'e1', handCardIds: ['ph1'] },
+      rng,
+    );
+
+    expect(next.playsRemaining).toBe(PLAYS_PER_TURN_BASE);
+    expect(next.log.some((l) => l.message.includes('bonus play'))).toBe(true);
+  });
+});

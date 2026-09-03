@@ -263,6 +263,9 @@ export interface PlayPreview {
   bonusGuard: number;
   bonusDamageAoe: number;
   bonusStatus: StatusBag;
+  drawAmount: number;
+  discardAmount: number;
+  bonusPlays: number;
 }
 
 /**
@@ -295,8 +298,8 @@ export function previewPlayerPlay(
   const magnitude = category === 'threat' ? withVulnerable(rawMagnitude, targetStatuses, VULNERABLE_PCT) : rawMagnitude;
   const idSet = new Set(handCardIds);
   const cards = state.playerHand.filter((c): c is CreatureCard => idSet.has(c.id) && c.kind === 'creature');
-  const { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus } = computeRiderTotals(cards);
-  return { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus };
+  const { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus, drawAmount, discardAmount, bonusPlays } = computeRiderTotals(cards, tableCountAfterPlay);
+  return { category, tableCountAfterPlay, magnitude, strengthStacks, weakenStacks, vulnerableStacks, bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus, drawAmount, discardAmount, bonusPlays };
 }
 
 function isLegalPlay(
@@ -393,20 +396,51 @@ function computeMagnitude(
   return { tableCountAfterPlay, magnitude, strengthStacks, weakenStacks };
 }
 
-/** Sums the rider each of `cards` fires (see applyRiders) into the same combined bonus-damage/bonus-guard/bonus-damage-aoe/bonus-status totals a resolving play would apply -- shared by the real resolver and any preview built ahead of a play. bonusStatus is a StatusBag rather than a single number since (unlike the other three) its "amount" is spread across whichever StatusId each contributing card's rider names -- a play can only ever mix multiple statusIds if it combines two different named specials of the same suit, but summing into a bag handles that for free instead of assuming just one. */
-function computeRiderTotals(cards: CreatureCard[]): { bonusDamage: number; bonusGuard: number; bonusDamageAoe: number; bonusStatus: StatusBag } {
+/**
+ * Sums the rider each of `cards` fires (see applyRiders) into the same
+ * combined totals a resolving play would apply -- shared by the real
+ * resolver and any preview built ahead of a play. bonusStatus is a
+ * StatusBag rather than a single number since (unlike the flat-amount
+ * kinds) its "amount" is spread across whichever StatusId each contributing
+ * card's rider names -- a play can only ever mix multiple statusIds if it
+ * combines two different named specials of the same suit, but summing into
+ * a bag handles that for free instead of assuming just one. bonus-per-card
+ * folds straight into bonusDamage/bonusGuard (routed the same threat/
+ * weaken/poison-vs-rest way basicRiderForCategory already splits) rather
+ * than getting its own return field, since `tableCountAfterPlay` scaling is
+ * the only thing that makes it different from bonus-damage/bonus-guard --
+ * once scaled, it's the same bucket, so every downstream consumer (the
+ * resolver's actual damage/guard application, the UI preview's combined
+ * total) needs no bonus-per-card-specific code at all.
+ */
+function computeRiderTotals(
+  cards: CreatureCard[],
+  tableCountAfterPlay: number,
+): { bonusDamage: number; bonusGuard: number; bonusDamageAoe: number; bonusStatus: StatusBag; drawAmount: number; discardAmount: number; bonusPlays: number } {
   let bonusDamage = 0;
   let bonusGuard = 0;
   let bonusDamageAoe = 0;
   let bonusStatus: StatusBag = {};
+  let drawAmount = 0;
+  let discardAmount = 0;
+  let bonusPlays = 0;
   for (const card of cards) {
-    const rider = riderForCard(card, suitCategory(card.suit));
+    const category = suitCategory(card.suit);
+    const rider = riderForCard(card, category);
+    const targetsDamage = category === 'threat' || category === 'weaken' || category === 'poison';
     if (rider.kind === 'bonus-damage') bonusDamage += rider.amount;
     else if (rider.kind === 'bonus-guard') bonusGuard += rider.amount;
     else if (rider.kind === 'bonus-damage-aoe') bonusDamageAoe += rider.amount;
-    else bonusStatus = addStacks(bonusStatus, rider.statusId, rider.amount);
+    else if (rider.kind === 'bonus-status') bonusStatus = addStacks(bonusStatus, rider.statusId, rider.amount);
+    else if (rider.kind === 'bonus-per-card') {
+      const scaled = rider.amount * tableCountAfterPlay;
+      if (targetsDamage) bonusDamage += scaled;
+      else bonusGuard += scaled;
+    } else if (rider.kind === 'draw') drawAmount += rider.amount;
+    else if (rider.kind === 'discard') discardAmount += rider.amount;
+    else bonusPlays += rider.amount;
   }
-  return { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus };
+  return { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus, drawAmount, discardAmount, bonusPlays };
 }
 
 function performPlay(
@@ -415,6 +449,7 @@ function performPlay(
   suit: SuitId,
   targetInstanceId: string | undefined,
   handCardIds: string[],
+  rng: Rng,
 ): CombatState {
   const category = suitCategory(suit);
   const actorStatuses = actorStatusesOf(state, actor);
@@ -590,7 +625,7 @@ function performPlay(
   if (actor.kind === 'player') {
     next = applyCurrencyOverflow(next, roomCountBeforeClaim);
   }
-  next = applyRiders(next, actor, targetInstanceId, playedCards);
+  next = applyRiders(next, actor, targetInstanceId, playedCards, tableCountAfterPlay, rng);
   next = applyRelics(next, actor, category, suit, targetInstanceId);
 
   return next;
@@ -599,27 +634,32 @@ function performPlay(
 /**
  * Fires every played card's rider effect (see types/specialCards.ts) -- runs
  * after the suit's own category effect (and its log line) has fully
- * resolved, and never touches the magnitude formula above. Every creature
- * card carries a rider now: a named special's own (bigger) rider if it has a
- * specialId, otherwise its suit's small basic rider (config/specialCards.ts's
- * basicRiderForCategory). A play's cards always share one suit, so they
- * always share one rider kind too -- summed into a single combined
- * damage-or-guard bump and one log line, rather than one line per card,
- * since a big play can commit many cards at once. bonus-damage reuses the
- * same target the category effect already resolved against -- only ever
- * paired with threat/weaken/poison suits, so targetInstanceId is guaranteed
- * set for a player actor by isLegalPlay's own requiresEnemyTarget check.
+ * resolved, and never touches the magnitude formula above (bonus-per-card
+ * scales by tableCountAfterPlay, but still lands as a post-hoc add, same as
+ * every other rider). Every creature card carries a rider now: a named
+ * special's own (bigger) rider if it has a specialId, otherwise its suit's
+ * small basic rider (config/specialCards.ts's basicRiderForCategory). A
+ * play's cards always share one suit, so they always share one rider kind
+ * too -- summed into a single combined bump per resource and one log line
+ * per resource, rather than one line per card, since a big play can commit
+ * many cards at once. bonus-damage reuses the same target the category
+ * effect already resolved against -- only ever paired with threat/weaken/
+ * poison suits, so targetInstanceId is guaranteed set for a player actor by
+ * isLegalPlay's own requiresEnemyTarget check. `rng` is only needed for the
+ * draw rider's drawCards call below; every other rider is deterministic.
  */
 function applyRiders(
   state: CombatState,
   actor: Actor,
   targetInstanceId: string | undefined,
   playedCards: CreatureCard[],
+  tableCountAfterPlay: number,
+  rng: Rng,
 ): CombatState {
   let next = state;
   const actorName = actorNameOf(state, actor);
 
-  const { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus } = computeRiderTotals(playedCards);
+  const { bonusDamage, bonusGuard, bonusDamageAoe, bonusStatus, drawAmount, discardAmount, bonusPlays } = computeRiderTotals(playedCards, tableCountAfterPlay);
 
   // Single-card plays keep the flavorful source name (a named special's own
   // name, or the plain suit's name) in the log line; multi-card plays fold
@@ -752,6 +792,83 @@ function applyRiders(
         }
       }
     }
+  }
+
+  // draw -- always benefits whoever played the card, from their own
+  // drawPile/discardPile (drawCards already handles reshuffling on empty --
+  // see deckState.ts). May draw fewer than requested if both piles run dry;
+  // drawn.length (not the requested amount) is what's logged.
+  if (drawAmount > 0) {
+    if (actor.kind === 'player') {
+      const { drawn, drawPile, discardPile } = drawCards(next.drawPile, next.discardPile, drawAmount, rng);
+      if (drawn.length > 0) {
+        next = { ...next, playerHand: [...next.playerHand, ...drawn], drawPile, discardPile };
+        next = {
+          ...next,
+          log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', `${sourceLabel} also draws ${drawn.length} card${drawn.length === 1 ? '' : 's'}.`, snapshotOf(next))],
+        };
+      }
+    } else {
+      const enemy = next.enemies.find((e) => e.instanceId === actor.instanceId)!;
+      const { drawn, drawPile, discardPile } = drawCards(enemy.drawPile, enemy.discardPile, drawAmount, rng);
+      if (drawn.length > 0) {
+        next = updateEnemy(next, actor.instanceId, (e) => ({ ...e, hand: [...e.hand, ...drawn], drawPile, discardPile }));
+        next = {
+          ...next,
+          log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${sourceLabel} also draws ${drawn.length} card${drawn.length === 1 ? '' : 's'}.`, snapshotOf(next))],
+        };
+      }
+    }
+  }
+
+  // discard -- always targets the opponent (only ever paired with threat/
+  // weaken/poison suits, so targetInstanceId is set for a player actor same
+  // as bonus-damage above). Deterministic: the first discardAmount cards in
+  // the target's own hand order, no rng needed. Silently discards fewer if
+  // the target's hand is already smaller than discardAmount.
+  if (discardAmount > 0) {
+    if (actor.kind === 'player') {
+      const enemy = next.enemies.find((e) => e.instanceId === targetInstanceId);
+      if (enemy) {
+        const toDiscard = enemy.hand.slice(0, discardAmount);
+        if (toDiscard.length > 0) {
+          next = updateEnemy(next, enemy.instanceId, (e) => ({ ...e, hand: e.hand.slice(toDiscard.length), discardPile: [...e.discardPile, ...toDiscard] }));
+          next = {
+            ...next,
+            log: [...next.log, makeLog(next.turnNumber, 'player', 'rider', `${sourceLabel} also forces ${enemy.name} to discard ${toDiscard.length} card${toDiscard.length === 1 ? '' : 's'}.`, snapshotOf(next))],
+          };
+        }
+      }
+    } else {
+      const toDiscard = next.playerHand.slice(0, discardAmount);
+      if (toDiscard.length > 0) {
+        next = { ...next, playerHand: next.playerHand.slice(toDiscard.length), discardPile: [...next.discardPile, ...toDiscard] };
+        next = {
+          ...next,
+          log: [...next.log, makeLog(next.turnNumber, 'enemy', 'rider', `${actorName}'s ${sourceLabel} also forces you to discard ${toDiscard.length} card${toDiscard.length === 1 ? '' : 's'}.`, snapshotOf(next))],
+        };
+      }
+    }
+  }
+
+  // bonus-plays -- Quake's rider-sized cousin, same state.playsRemaining
+  // Quake itself tops up (see PLAYER_PLAY_QUAKE below). Works correctly for
+  // a player actor since PLAY_SET's own playsRemaining -= 1 runs after this
+  // whole function returns (see applyCombatAction). A no-op in practice for
+  // an enemy actor -- resolveEnemyTurn computes its play-count loop bound
+  // once, locally, before looping, so bumping playsRemaining here doesn't
+  // grant the enemy an extra iteration -- but harmless, and moot today
+  // since no enemy roster (config/enemies.ts) holds a bonus-plays special.
+  if (bonusPlays > 0) {
+    next = { ...next, playsRemaining: next.playsRemaining + bonusPlays };
+    const msg =
+      actor.kind === 'player'
+        ? `${sourceLabel} also grants ${bonusPlays} bonus play${bonusPlays === 1 ? '' : 's'} this turn.`
+        : `${actorName}'s ${sourceLabel} also grants ${bonusPlays} bonus play${bonusPlays === 1 ? '' : 's'} this turn.`;
+    next = {
+      ...next,
+      log: [...next.log, makeLog(next.turnNumber, actor.kind === 'player' ? 'player' : 'enemy', 'rider', msg, snapshotOf(next))],
+    };
   }
 
   return next;
@@ -1055,7 +1172,7 @@ function resolveEnemyTurn(state: CombatState, rng: Rng): CombatState {
       };
       break;
     }
-    next = performPlay(next, { kind: 'enemy', instanceId: enemyId }, choice.suit, undefined, choice.handCardIds);
+    next = performPlay(next, { kind: 'enemy', instanceId: enemyId }, choice.suit, undefined, choice.handCardIds, rng);
   }
 
   // Tick this enemy's own statuses once, at the true end of its own turn --
@@ -1284,7 +1401,7 @@ export function applyCombatAction(state: CombatState, action: CombatAction, rng:
   if (action.type === 'PLAY_SET') {
     if (state.activeTurn !== 'player') return state;
     if (!isLegalPlay(state, action.suit, action.targetInstanceId, action.handCardIds)) return state;
-    let played = performPlay(state, { kind: 'player' }, action.suit, action.targetInstanceId, action.handCardIds);
+    let played = performPlay(state, { kind: 'player' }, action.suit, action.targetInstanceId, action.handCardIds, rng);
     // Every play spends exactly one of the turn's plays regardless of how
     // many hand cards it used -- the pool itself is what a bonus like
     // Quake's tops up, so there's no separate spend-bypass case any more.

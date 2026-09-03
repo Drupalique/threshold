@@ -20,7 +20,7 @@ export function CardFace({ card, showRider = true }: { card: CreatureCard; showR
     <>
       <span className="card-chip-icon" aria-hidden="true">{suitIcon(card.suit)}</span>
       <span className="card-chip-label">{specialDef ? specialDef.name : suitDef.name}</span>
-      {showRider && <span className="card-chip-rider">{riderBadgeText(rider)}</span>}
+      {showRider && <span className="card-chip-rider">{riderBadgeText(rider, suitDef.category)}</span>}
     </>
   );
 }
