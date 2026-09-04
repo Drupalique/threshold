@@ -8,11 +8,11 @@ export interface RunContextValue {
   dispatchCombat: (action: CombatAction) => void;
   resolveCombatEnd: () => void;
   chooseReward: (cardId: string) => void;
+  claimRewardRelic: () => void;
+  claimRewardPotion: () => void;
   skipReward: () => void;
   restHeal: () => void;
   restRemoveCard: (cardId: string) => void;
-  chooseRelic: (relicId: string) => void;
-  skipShrine: () => void;
   buyShopOption: (optionId: string) => void;
   resolveDeckAction: (cardId: string) => void;
   leaveShop: () => void;

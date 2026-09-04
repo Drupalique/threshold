@@ -4,12 +4,12 @@ import {
   startFirstRoom,
   resolveCombatEnd,
   chooseReward,
+  claimRewardRelic,
+  claimRewardPotion,
   skipReward,
   chooseDoor,
   restHeal,
   restRemoveCard,
-  chooseRelic,
-  skipShrine,
   buyShopOption,
   resolveDeckAction,
   leaveShop,
@@ -73,11 +73,14 @@ function enterRestRoom(run: RunState): RunState {
 }
 
 /**
- * Forces the run into the 'shrine' phase deterministically, bypassing
- * runTree's RNG-dependent SHRINE_ROOM_RATIO roll -- same synthetic-node
- * trick enterRestRoom uses. Since shrine content is generated live (not
- * precomputed in the tree, see types/room.ts's ShrineRoomInstance), this
- * exercises chooseDoor's own generateShrineOptions call, not a canned list.
+ * Forces the run into the 'reward' phase via a shrine door deterministically,
+ * bypassing runTree's RNG-dependent SHRINE_ROOM_RATIO roll -- same
+ * synthetic-node trick enterRestRoom uses. Since shrine content is generated
+ * live (not precomputed in the tree, see types/room.ts's ShrineRoomInstance),
+ * this exercises chooseDoor's own generateShrineReward call, not a canned
+ * list. Unlike enterRestRoom, this also advances depth (see chooseDoor's
+ * shrine branch), since a shrine's reward offer generates the same way a
+ * combat clear's does.
  */
 function enterShrineRoom(run: RunState): RunState {
   const shrineRoom: ShrineRoomInstance = { kind: 'shrine', id: 'test-shrine-room' };
@@ -141,34 +144,28 @@ function enterShopRoom(run: RunState): RunState {
 }
 
 describe('reward flow', () => {
-  it('offers deterministic options for a given seed, and the chosen card lands in the deck and the next room\'s draw', () => {
+  it('always offers exactly REWARD_CARD_COUNT deterministic card choices for a given seed, and the chosen card lands in the deck and the next room\'s draw', () => {
     let run = createNewRun(99);
     run = startFirstRoom(run);
     run = resolveCombatEnd(clearCurrentRoom(run));
 
     expect(run.phase).toBe('reward');
-    expect(run.rewardOptions).not.toBeNull();
-    expect(run.rewardOptions!.length).toBe(3);
+    expect(run.rewardOffer).not.toBeNull();
+    expect(run.rewardOffer!.cardOptions.length).toBe(3);
 
     // Determinism: the same seed run through the same sequence of calls
-    // yields the same reward options.
+    // yields the same card options.
     let run2 = createNewRun(99);
     run2 = startFirstRoom(run2);
     run2 = resolveCombatEnd(clearCurrentRoom(run2));
-    expect(run2.rewardOptions!.map((c) => c.id)).toEqual(run.rewardOptions!.map((c) => c.id));
+    expect(run2.rewardOffer!.cardOptions.map((c) => c.id)).toEqual(run.rewardOffer!.cardOptions.map((c) => c.id));
 
-    // Pick whichever reward option is a card -- reward slots can also be a
-    // relic or potion (see the optionType-filtered tests below), neither of
-    // which lands in run.deck, so this test needs a card specifically rather
-    // than assuming index 0 happens to be one.
-    const cardOption = run.rewardOptions!.find((o) => o.optionType === 'card');
-    if (cardOption?.optionType !== 'card') throw new Error('expected seed 99 to offer a card reward');
-    const chosenId = cardOption.id;
+    const chosenId = run.rewardOffer!.cardOptions[0].id;
     const deckSizeBefore = run.deck.length;
     run = chooseReward(run, chosenId);
 
     expect(run.phase).toBe('door-choice');
-    expect(run.rewardOptions).toBeNull();
+    expect(run.rewardOffer).toBeNull();
     expect(run.deck.length).toBe(deckSizeBefore + 1);
     expect(run.deck.some((c) => c.id === chosenId)).toBe(true);
 
@@ -207,7 +204,7 @@ describe('reward flow', () => {
     run = skipReward(run);
 
     expect(run.phase).toBe('door-choice');
-    expect(run.rewardOptions).toBeNull();
+    expect(run.rewardOffer).toBeNull();
     expect(run.deck.length).toBe(deckSizeBefore);
     expect(run.currentDoors).not.toBeNull();
   });
@@ -224,7 +221,72 @@ describe('reward flow', () => {
     run = resolveCombatEnd(clearCurrentRoom(run));
 
     expect(run.phase).toBe('run-complete');
-    expect(run.rewardOptions).toBeNull();
+    expect(run.rewardOffer).toBeNull();
+  });
+
+  it('claimRewardRelic adds the offered relic and clears it off the offer, without leaving the reward phase or touching the still-unpicked card row', () => {
+    let run = createNewRun(99);
+    run = startFirstRoom(run);
+    run = resolveCombatEnd(clearCurrentRoom(run));
+    // Force a relic onto the offer regardless of what the seed actually
+    // rolled -- claimRewardRelic's own behavior is what's under test here,
+    // not RELIC_REWARD_RATIO's odds.
+    const relic = RELIC_DEFS[0];
+    run = { ...run, rewardOffer: { ...run.rewardOffer!, relic } };
+
+    run = claimRewardRelic(run);
+
+    expect(run.relics).toEqual([relic]);
+    expect(run.phase).toBe('reward'); // claiming a relic doesn't end the visit
+    expect(run.rewardOffer!.relic).toBeNull();
+    expect(run.rewardOffer!.cardOptions.length).toBe(3); // untouched
+
+    // A second claim is a no-op -- the relic is already off the offer.
+    const reclaimed = claimRewardRelic(run);
+    expect(reclaimed).toBe(run);
+  });
+
+  it('claimRewardPotion adds the offered potion and clears it off the offer, the same independent-row way claimRewardRelic does', () => {
+    let run = createNewRun(99);
+    run = startFirstRoom(run);
+    run = resolveCombatEnd(clearCurrentRoom(run));
+    const potion = potionById('salt');
+    run = { ...run, rewardOffer: { ...run.rewardOffer!, potion } };
+
+    run = claimRewardPotion(run);
+
+    expect(run.potions).toEqual([potion]);
+    expect(run.phase).toBe('reward');
+    expect(run.rewardOffer!.potion).toBeNull();
+
+    const reclaimed = claimRewardPotion(run);
+    expect(reclaimed).toBe(run);
+  });
+
+  it('claiming a relic and a potion, then choosing a card, keeps all three and ends the visit', () => {
+    let run = createNewRun(99);
+    run = startFirstRoom(run);
+    run = resolveCombatEnd(clearCurrentRoom(run));
+    const relic = RELIC_DEFS[0];
+    const potion = potionById('salt');
+    run = { ...run, rewardOffer: { ...run.rewardOffer!, relic, potion } };
+
+    run = claimRewardRelic(run);
+    run = claimRewardPotion(run);
+    const chosenId = run.rewardOffer!.cardOptions[0].id;
+    run = chooseReward(run, chosenId);
+
+    expect(run.relics).toEqual([relic]);
+    expect(run.potions).toEqual([potion]);
+    expect(run.deck.some((c) => c.id === chosenId)).toBe(true);
+    expect(run.phase).toBe('door-choice');
+    expect(run.rewardOffer).toBeNull();
+  });
+
+  it('claimRewardRelic and claimRewardPotion are both no-ops outside the reward phase, or when nothing is on offer', () => {
+    const run = createNewRun(7);
+    expect(claimRewardRelic(run)).toBe(run);
+    expect(claimRewardPotion(run)).toBe(run);
   });
 });
 
@@ -250,7 +312,7 @@ describe('rest rooms', () => {
     // REST_HEAL_PCT is 0.3 of PLAYER_HP_MAX (30) = 9, rounded.
     expect(run.playerHP).toBe(19);
     expect(run.phase).toBe('door-choice');
-    expect(run.rewardOptions).toBeNull();
+    expect(run.rewardOffer).toBeNull();
     expect(run.depth).toBe(depthBefore + 1);
   });
 
@@ -297,25 +359,23 @@ describe('rest rooms', () => {
 });
 
 describe('potions', () => {
-  it('a reward option of optionType potion, chosen, lands in run.potions and carries into the next room\'s combat.potions', () => {
-    // Seed 1 is known to roll a potion into one of its 3 reward slots
-    // (POTION_REWARD_RATIO is low, so an arbitrary seed usually won't).
-    let run = createNewRun(1);
+  it('a claimed potion lands in run.potions and carries into the next room\'s combat.potions', () => {
+    let run = createNewRun(3);
     run = startFirstRoom(run);
     run = resolveCombatEnd(clearCurrentRoom(run));
+    const potion = potionById('salt');
+    run = { ...run, rewardOffer: { ...run.rewardOffer!, potion } };
 
-    const potionOption = run.rewardOptions!.find((o) => o.optionType === 'potion');
-    if (potionOption?.optionType !== 'potion') throw new Error('expected seed 1 to offer a potion reward');
-
-    run = chooseReward(run, potionOption.id);
-    expect(run.potions).toEqual([potionOption.potion]);
+    run = claimRewardPotion(run);
+    run = skipReward(run);
+    expect(run.potions).toEqual([potion]);
     expect(run.phase).toBe('door-choice');
 
     const combatDoor = run.currentDoors!.find(
       (d) => run.runTree.nodes[d.childPath].room.kind === 'combat',
     )!;
     run = chooseDoor(run, combatDoor.id);
-    expect(run.combat!.potions).toEqual([potionOption.potion]);
+    expect(run.combat!.potions).toEqual([potion]);
   });
 
   it('holds potions across a rest room the same way it holds relics', () => {
@@ -330,52 +390,45 @@ describe('potions', () => {
 });
 
 describe('shrine rooms', () => {
-  it('choosing a door into a shrine sets phase to shrine with generated (non-empty) options and no combat state', () => {
+  it('choosing a door into a shrine advances depth and sets phase to reward with a relic-only offer and no combat state', () => {
     let run = createNewRun(3);
     run = startFirstRoom(run);
-    run = enterShrineRoom(run);
-
-    expect(run.phase).toBe('shrine');
-    expect(run.combat).toBeNull();
-    expect(run.shrineOptions).not.toBeNull();
-    expect(run.shrineOptions!.length).toBeGreaterThan(0);
-  });
-
-  it('chooseRelic adds exactly the picked relic to held relics and proceeds to door-choice with no reward phase', () => {
-    let run = createNewRun(3);
-    run = startFirstRoom(run);
-    run = enterShrineRoom(run);
     const depthBefore = run.depth;
-    const chosen = run.shrineOptions![0];
+    run = enterShrineRoom(run);
 
-    run = chooseRelic(run, chosen.id);
-
-    expect(run.relics).toEqual([chosen]);
-    expect(run.shrineOptions).toBeNull();
-    expect(run.phase).toBe('door-choice');
-    expect(run.rewardOptions).toBeNull();
+    expect(run.phase).toBe('reward');
+    expect(run.combat).toBeNull();
+    expect(run.rewardOffer).not.toBeNull();
+    expect(run.rewardOffer!.cardOptions).toEqual([]);
+    expect(run.rewardOffer!.potion).toBeNull();
+    expect(run.rewardOffer!.relic).not.toBeNull();
     expect(run.depth).toBe(depthBefore + 1);
   });
 
-  it('chooseRelic rejects an id that was not offered, leaving the run in the shrine phase', () => {
+  it('claimRewardRelic adds exactly the offered relic to held relics, then skipReward proceeds to door-choice', () => {
     let run = createNewRun(3);
     run = startFirstRoom(run);
     run = enterShrineRoom(run);
+    const offered = run.rewardOffer!.relic!;
 
-    const rejected = chooseRelic(run, 'not-a-real-relic');
-    expect(rejected).toBe(run);
-    expect(rejected.phase).toBe('shrine');
+    run = claimRewardRelic(run);
+    expect(run.relics).toEqual([offered]);
+    expect(run.rewardOffer!.relic).toBeNull();
+
+    run = skipReward(run);
+    expect(run.phase).toBe('door-choice');
+    expect(run.rewardOffer).toBeNull();
   });
 
-  it('skipShrine leaves relics untouched and proceeds to door-choice', () => {
+  it('skipReward leaves relics untouched and proceeds to door-choice', () => {
     let run = createNewRun(3);
     run = startFirstRoom(run);
     run = enterShrineRoom(run);
 
-    run = skipShrine(run);
+    run = skipReward(run);
 
     expect(run.relics).toEqual([]);
-    expect(run.shrineOptions).toBeNull();
+    expect(run.rewardOffer).toBeNull();
     expect(run.phase).toBe('door-choice');
   });
 
@@ -383,18 +436,13 @@ describe('shrine rooms', () => {
     let run = createNewRun(3);
     run = startFirstRoom(run);
     run = enterShrineRoom(run);
-    const firstPick = run.shrineOptions![0];
-    run = chooseRelic(run, firstPick.id);
+    const firstPick = run.rewardOffer!.relic!;
+    run = claimRewardRelic(run);
+    run = skipReward(run);
 
     run = enterShrineRoom(run);
 
-    expect(run.shrineOptions!.some((r) => r.id === firstPick.id)).toBe(false);
-  });
-
-  it('chooseRelic and skipShrine are both no-ops outside the shrine phase', () => {
-    const run = createNewRun(3);
-    expect(chooseRelic(run, 'anything')).toBe(run);
-    expect(skipShrine(run)).toBe(run);
+    expect(run.rewardOffer!.relic?.id).not.toBe(firstPick.id);
   });
 });
 

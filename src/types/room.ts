@@ -59,14 +59,17 @@ export interface RestRoomInstance {
 }
 
 /**
- * A relic-offering stop, resolved by runEngine's chooseRelic/skipShrine
- * rather than combatEngine.ts -- see doorGenerator.ts/runTree.ts's
+ * A relic-offering stop -- resolved into the same 'reward' phase/RewardScreen
+ * a cleared combat room uses (see runEngine's chooseDoor/types/run.ts's
+ * RewardOffer), just with an empty cardOptions and only its relic row
+ * populated (rewardGenerator.ts's generateShrineReward), rather than a
+ * separate shrine phase/screen. See doorGenerator.ts/runTree.ts's
  * SHRINE_ROOM_RATIO roll. Unlike CombatRoomInstance/RestRoomInstance, its
- * offer isn't precomputed here: which relics it offers must exclude
- * whatever the player already holds by the time they arrive, and the run
- * tree is built once at run start before any relics exist. So its content
- * is generated live off run.rng in chooseDoor, the same way reward options
- * already are, instead of being fixed by the tree's own seed.
+ * offer isn't precomputed here: which relic it offers must exclude whatever
+ * the player already holds by the time they arrive, and the run tree is
+ * built once at run start before any relics exist. So its content is
+ * generated live off run.rng in chooseDoor, the same way a reward offer
+ * already is.
  */
 export interface ShrineRoomInstance {
   kind: 'shrine';

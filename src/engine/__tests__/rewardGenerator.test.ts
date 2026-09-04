@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { createRng } from '../rng';
-import { generateRewardOptions, generateShopOptions, REWARD_SUITS } from '../rewardGenerator';
+import { generateRewardOffer, generateShopOptions, REWARD_SUITS } from '../rewardGenerator';
 import type { Card } from '../../types/cards';
 
 describe("reward weighting toward the cleared room's threat suits", () => {
-  it('biases a reward\'s plain suit-slot picks toward the given threatSuits, without making other suits impossible', () => {
+  it('biases a reward\'s plain card-slot picks toward the given threatSuits, without making other suits impossible', () => {
     const rng = createRng(7);
     const suitCounts: Record<string, number> = {};
     for (let i = 0; i < 400; i++) {
-      const options = generateRewardOptions(i, rng, [], [], ['wolf']);
-      for (const o of options) {
-        if (o.optionType === 'card' && o.card.kind === 'creature' && !o.card.specialId) {
-          suitCounts[o.card.suit] = (suitCounts[o.card.suit] ?? 0) + 1;
+      const offer = generateRewardOffer(i, rng, [], [], ['wolf']);
+      for (const card of offer.cardOptions) {
+        if (card.kind === 'creature' && !card.specialId) {
+          suitCounts[card.suit] = (suitCounts[card.suit] ?? 0) + 1;
         }
       }
     }
@@ -28,8 +28,8 @@ describe("reward weighting toward the cleared room's threat suits", () => {
 
   it('falls back to a plain uniform pick when threatSuits is empty', () => {
     const rng = createRng(9);
-    const options = generateRewardOptions(0, rng, [], [], []);
-    expect(options.length).toBeGreaterThan(0);
+    const offer = generateRewardOffer(0, rng, [], [], []);
+    expect(offer.cardOptions.length).toBeGreaterThan(0);
   });
 });
 

@@ -1,10 +1,10 @@
 import type { SuitId } from '../types/suits';
 import type { Card } from '../types/cards';
-import type { RewardOption, ShopOption, DeckActionKind } from '../types/run';
+import type { RewardOffer, ShopOption, DeckActionKind } from '../types/run';
 import type { RelicDef } from '../types/relics';
 import type { PotionDef } from '../types/potions';
 import type { Rng } from './rng';
-import { uniformPick, weightedPick, pickDistinct } from './weightedPick';
+import { uniformPick, weightedPick } from './weightedPick';
 import { SPECIAL_CARD_DEFS, RARITY_WEIGHT } from '../config/specialCards';
 import { RELIC_DEFS } from '../config/relics';
 import { POTION_DEFS } from '../config/potions';
@@ -21,9 +21,8 @@ import {
   RELIC_REWARD_RATIO,
   POTION_REWARD_RATIO,
   POTION_INVENTORY_CAP,
-  REWARD_OPTION_COUNT,
+  REWARD_CARD_COUNT,
   REWARD_THREAT_SUIT_BIAS,
-  SHRINE_OPTION_COUNT,
   SHOP_OPTION_COUNT,
   SHOP_CARD_PRICE,
   SHOP_RELIC_PRICE,
@@ -41,7 +40,17 @@ import {
 // rerolls a card into a random *different* suit from this same list.
 export const REWARD_SUITS: SuitId[] = [...THREAT_SUITS, BOON_SUIT, GUARD_SUIT, WEAKEN_SUIT, POISON_SUIT, STRENGTH_SUIT];
 
-type RewardCategory = 'suit' | 'special' | 'quake' | 'cleave' | 'relic' | 'potion';
+// The category space a single reward-screen *card* slot rolls across.
+// Deliberately narrower than the shop's own category set below: a relic/
+// potion is never one of the REWARD_CARD_COUNT card choices any more, it's
+// its own independent row (see generateRewardOffer) that doesn't compete
+// with cards for a slot.
+type CardRewardCategory = 'suit' | 'special' | 'quake' | 'cleave';
+
+// The shop's own (wider) slot category space -- still includes relic/
+// potion/deck-action, since a shop visit's slots really do all compete for
+// the same SHOP_OPTION_COUNT spots (see generateShopOptions).
+type ShopSlotCategory = 'suit' | 'special' | 'quake' | 'cleave' | 'relic' | 'potion' | 'deck-action';
 
 // Rolls which SPECIAL_CARD_DEFS entry a 'special' reward/shop slot actually
 // resolves to, skewed by rarity (RARITY_WEIGHT) instead of a flat
@@ -84,113 +93,122 @@ function cardOptionKey(card: Card): string {
   return card.kind === 'creature' ? `creature:${card.suit}:${card.specialId ?? 'plain'}` : card.kind;
 }
 
-// Reroll cap for generateRewardOptions' per-slot dedupe loop -- comfortably
-// above what a handful of collisions would ever need (the card pool is ~9
-// suits + ~20 specials + Quake/Cleave against only REWARD_OPTION_COUNT (3)
-// slots), just high enough to guarantee termination rather than spin forever
-// in some future degenerate config.
+// Reroll cap for generateRewardCardOptions' per-slot dedupe loop --
+// comfortably above what a handful of collisions would ever need (the card
+// pool is ~9 suits + ~20 specials + Quake/Cleave against only
+// REWARD_CARD_COUNT (3) slots), just high enough to guarantee termination
+// rather than spin forever in some future degenerate config.
 const REWARD_DEDUPE_MAX_ATTEMPTS = 30;
 
 /**
- * MVP reward shape: a threat-suit-biased pick (see pickRewardSuit) across
- * every suit per slot, Quake/Cleave/a named special card (config/
- * specialCards.ts)/a relic (config/relics.ts)/a potion (config/potions.ts)
- * each folded in at their own low weight -- no removal/upgrade options yet
- * (see runEngine.ts's shop-only deck actions for those). `depth` only feeds
- * the returned ids' uniqueness, not the odds; every slot draws from the same
- * full suit/special/relic/potion pool regardless of depth. Falls back to an
- * ordinary suit pick if every relic is already held (`heldRelics`) or the
- * potion inventory is already at POTION_INVENTORY_CAP (`heldPotions`),
- * rather than ever offering a relic duplicate or growing potions unbounded.
- * `threatSuits` is the just-cleared room's own RoomParams.threatSuits (empty
- * for a reward not tied to a combat room).
+ * One reward-screen card slot's roll: a named special card (config/
+ * specialCards.ts) is the dominant outcome (SPECIAL_REWARD_RATIO), with a
+ * plain suited copy -- a threat-suit-biased pick, see pickRewardSuit --
+ * folded in at its own low (remainder) weight instead, alongside Quake/
+ * Cleave at their own low weights. Inverted from this pool's original
+ * shape: a plain copy is the card a player already has the most of, so it
+ * reads as the "nothing new" outcome and should be the rare one, while a
+ * named special is the "next tier up" a reward should generally hand over.
+ * relic/potion are deliberately not part of this pool at all any more, see
+ * generateRewardOffer for why. Factored out of generateRewardCardOptions so
+ * its caller can reroll on a card-content collision without duplicating the
+ * whole category/weight table. `threatSuits` is the just-cleared room's own
+ * RoomParams.threatSuits (empty for a reward not tied to a combat room),
+ * still used for the rare plain-suit pick's own suit bias.
  */
-// One reward slot's roll -- factored out of generateRewardOptions so its
-// caller can reroll on a card-content collision without duplicating the
-// whole category/weight table.
-function rollRewardOption(
-  id: string,
-  rng: Rng,
-  offerableRelics: RelicDef[],
-  potionSlotAvailable: boolean,
-  threatSuits: SuitId[],
-): RewardOption {
-  const category = weightedPick<RewardCategory>(rng, [
-    {
-      weight:
-        1 -
-        QUAKE_REWARD_RATIO -
-        CLEAVE_REWARD_RATIO -
-        SPECIAL_REWARD_RATIO -
-        RELIC_REWARD_RATIO -
-        POTION_REWARD_RATIO,
-      value: 'suit',
-    },
+function rollRewardCard(id: string, rng: Rng, threatSuits: SuitId[]): Card {
+  const category = weightedPick<CardRewardCategory>(rng, [
+    { weight: 1 - QUAKE_REWARD_RATIO - CLEAVE_REWARD_RATIO - SPECIAL_REWARD_RATIO, value: 'suit' },
     { weight: SPECIAL_REWARD_RATIO, value: 'special' },
     { weight: QUAKE_REWARD_RATIO, value: 'quake' },
     { weight: CLEAVE_REWARD_RATIO, value: 'cleave' },
-    { weight: offerableRelics.length > 0 ? RELIC_REWARD_RATIO : 0, value: 'relic' },
-    { weight: potionSlotAvailable ? POTION_REWARD_RATIO : 0, value: 'potion' },
   ]);
-  if (category === 'quake') {
-    return { id, optionType: 'card', card: { id, kind: 'quake' } };
-  } else if (category === 'cleave') {
-    return { id, optionType: 'card', card: { id, kind: 'cleave' } };
-  } else if (category === 'special') {
+  if (category === 'quake') return { id, kind: 'quake' };
+  if (category === 'cleave') return { id, kind: 'cleave' };
+  if (category === 'special') {
     const def = pickSpecialCardDef(rng);
-    return { id, optionType: 'card', card: { id, kind: 'creature', suit: def.suit, specialId: def.id } };
-  } else if (category === 'relic') {
-    const relic = uniformPick(rng, offerableRelics);
-    return { id, optionType: 'relic', relic };
-  } else if (category === 'potion') {
-    const potion = uniformPick(rng, POTION_DEFS);
-    return { id, optionType: 'potion', potion };
+    return { id, kind: 'creature', suit: def.suit, specialId: def.id };
   }
-  return { id, optionType: 'card', card: { id, kind: 'creature', suit: pickRewardSuit(rng, threatSuits) } };
+  return { id, kind: 'creature', suit: pickRewardSuit(rng, threatSuits) };
 }
 
-export function generateRewardOptions(
+// REWARD_CARD_COUNT card choices for a reward screen's card row -- `depth`
+// only feeds the returned ids' uniqueness, not the odds; every slot draws
+// from the same full suit/special/Quake/Cleave pool regardless of depth.
+function generateRewardCardOptions(depth: number, rng: Rng, threatSuits: SuitId[]): Card[] {
+  // Cards already offered this screen (by content, not id) -- a slot
+  // rerolls against this set so no two of the REWARD_CARD_COUNT choices are
+  // the same pick, even though owning a duplicate of something already in
+  // the deck is completely fine (see cardOptionKey).
+  const usedCardKeys = new Set<string>();
+  const cards: Card[] = [];
+  for (let i = 0; i < REWARD_CARD_COUNT; i++) {
+    const id = `reward-d${depth}-${i}`;
+    let card = rollRewardCard(id, rng, threatSuits);
+    for (
+      let attempt = 0;
+      usedCardKeys.has(cardOptionKey(card)) && attempt < REWARD_DEDUPE_MAX_ATTEMPTS;
+      attempt++
+    ) {
+      card = rollRewardCard(id, rng, threatSuits);
+    }
+    usedCardKeys.add(cardOptionKey(card));
+    cards.push(card);
+  }
+  return cards;
+}
+
+/**
+ * A post-combat reward offer (types/run.ts's RewardOffer): always
+ * REWARD_CARD_COUNT card choices (generateRewardCardOptions -- pick exactly
+ * one, or Pass), plus an independent roll for a relic row (RELIC_REWARD_
+ * RATIO odds, at most one, never a duplicate of something already held) and
+ * an independent roll for a potion row (POTION_REWARD_RATIO odds, skipped
+ * once `heldPotions` is already at POTION_INVENTORY_CAP) -- unlike the card
+ * row, a relic/potion never competes with a card for its slot, each is
+ * simply present or absent this screen (RewardScreen renders one row per
+ * populated field). `threatSuits` is the just-cleared room's own
+ * RoomParams.threatSuits, biasing the card row's suit picks.
+ */
+export function generateRewardOffer(
   depth: number,
   rng: Rng,
   heldRelics: RelicDef[],
   heldPotions: PotionDef[],
   threatSuits: SuitId[],
-): RewardOption[] {
+): RewardOffer {
+  const cardOptions = generateRewardCardOptions(depth, rng, threatSuits);
+
   const offerableRelics = unheldRelics(heldRelics);
+  const rollsRelic = offerableRelics.length > 0 && weightedPick<boolean>(rng, [
+    { weight: RELIC_REWARD_RATIO, value: true },
+    { weight: 1 - RELIC_REWARD_RATIO, value: false },
+  ]);
+  const relic = rollsRelic ? uniformPick(rng, offerableRelics) : null;
+
   const potionSlotAvailable = heldPotions.length < POTION_INVENTORY_CAP;
-  const options: RewardOption[] = [];
-  // Cards already offered this screen (by content, not id) -- a card slot
-  // rerolls against this set so no two of the REWARD_OPTION_COUNT choices are
-  // the same pick, even though owning a duplicate of something already in the
-  // deck is completely fine (see cardOptionKey). Relic/potion slots aren't
-  // subject to this: relics already dedupe via offerableRelics/unheldRelics,
-  // and potions are designed to stack.
-  const usedCardKeys = new Set<string>();
-  for (let i = 0; i < REWARD_OPTION_COUNT; i++) {
-    const id = `reward-d${depth}-${i}`;
-    let option = rollRewardOption(id, rng, offerableRelics, potionSlotAvailable, threatSuits);
-    for (
-      let attempt = 0;
-      option.optionType === 'card' && usedCardKeys.has(cardOptionKey(option.card)) && attempt < REWARD_DEDUPE_MAX_ATTEMPTS;
-      attempt++
-    ) {
-      option = rollRewardOption(id, rng, offerableRelics, potionSlotAvailable, threatSuits);
-    }
-    if (option.optionType === 'card') usedCardKeys.add(cardOptionKey(option.card));
-    options.push(option);
-  }
-  return options;
+  const rollsPotion = potionSlotAvailable && weightedPick<boolean>(rng, [
+    { weight: POTION_REWARD_RATIO, value: true },
+    { weight: 1 - POTION_REWARD_RATIO, value: false },
+  ]);
+  const potion = rollsPotion ? uniformPick(rng, POTION_DEFS) : null;
+
+  return { cardOptions, relic, potion };
 }
 
 /**
- * A shrine's relic offer -- generated live off run.rng (not precomputed in
- * the run tree, see types/room.ts's ShrineRoomInstance) so it can exclude
- * whatever's already in `heldRelics` by the time the player actually
- * arrives. Uniform, no Quake/special/suit filler -- a shrine only ever
- * offers relics.
+ * A shrine's offer (types/run.ts's RewardOffer) -- unlike a post-combat
+ * reward, a shrine's whole purpose is a relic, so no card row and no
+ * roll-chance of nothing: it always carries exactly one relic, or none at
+ * all if every relic is already held (`heldRelics`). Generated live off
+ * run.rng (not precomputed in the run tree, see types/room.ts's
+ * ShrineRoomInstance) so it can exclude whatever's already held by the time
+ * the player actually arrives.
  */
-export function generateShrineOptions(rng: Rng, heldRelics: RelicDef[]): RelicDef[] {
-  return pickDistinct(rng, unheldRelics(heldRelics), SHRINE_OPTION_COUNT);
+export function generateShrineReward(rng: Rng, heldRelics: RelicDef[]): RewardOffer {
+  const offerableRelics = unheldRelics(heldRelics);
+  const relic = offerableRelics.length > 0 ? uniformPick(rng, offerableRelics) : null;
+  return { cardOptions: [], relic, potion: null };
 }
 
 /** Eligible DeckActionKinds for the current `deck` -- Transform/Duplicate need any creature card, Upgrade additionally needs one with no specialId yet (see runEngine.ts's resolveDeckAction, which enforces the exact same eligibility when the purchase is actually resolved). */
@@ -206,11 +224,11 @@ function deckActionPrice(kind: DeckActionKind): number {
 }
 
 /**
- * A shop's priced offer -- SHOP_OPTION_COUNT slots, drawn from the same
- * category pool generateRewardOptions above uses (suit/special/Quake/
- * Cleave/relic/potion, same held-relic/potion-cap exclusion, but a plain
- * uniform suit pick -- a shop isn't tied to a just-cleared room's
- * threatSuits) plus a shop-only deck-action slot (Transform/Duplicate/
+ * A shop's priced offer -- SHOP_OPTION_COUNT slots, each independently
+ * rolling across the full suit/special/Quake/Cleave/relic/potion category
+ * space (same held-relic/potion-cap exclusion the reward screen's own rows
+ * use, but a plain uniform suit pick -- a shop isn't tied to a just-cleared
+ * room's threatSuits) plus a shop-only deck-action slot (Transform/Duplicate/
  * Upgrade -- MECHANIC_BRAINSTORM.md's Suit Reroll/Duplicate/Card Upgrade,
  * all three sharing this one venue per the doc's own reasoning), each
  * stamped with its fixed price (config/constants.ts's SHOP_CARD_PRICE/
@@ -229,7 +247,7 @@ export function generateShopOptions(rng: Rng, heldRelics: RelicDef[], heldPotion
   const options: ShopOption[] = [];
   for (let i = 0; i < SHOP_OPTION_COUNT; i++) {
     const id = `shop-${i}`;
-    const category = weightedPick<RewardCategory | 'deck-action'>(rng, [
+    const category = weightedPick<ShopSlotCategory>(rng, [
       {
         weight:
           1 -

@@ -670,11 +670,25 @@ button {
   padding: 2rem 0;
 }
 
-.reward-choices {
+/* One of these per populated RewardOffer field (types/run.ts) -- a card
+   row, a relic row, a potion row -- each independently click-to-claim, see
+   RewardScreen.tsx. */
+.reward-row {
+  margin-top: 2rem;
+}
+
+.reward-row-label {
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #999;
+}
+
+.reward-row-items {
   display: flex;
   justify-content: center;
   gap: 1rem;
-  margin-top: 2rem;
 }
 
 .reward-choice .card-chip {
@@ -683,73 +697,60 @@ button {
   font-size: 1.05rem;
 }
 
-.reward-choice--relic {
+/* Relic/potion's own chip face (ui/components/RewardItemChip.tsx) -- a
+   gradient+dashed-border card, same visual language as card-chip--quake/
+   card-chip--cleave use to mark "not an ordinary suit card", so a relic or
+   potion reads as its own distinct kind of thing rather than plain text. */
+.reward-item-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
   min-width: 160px;
   max-width: 220px;
-  background: #1c1c26;
   border-radius: 8px;
+  border: 2px dashed #fff;
   padding: 1rem 1.25rem;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
+  color: #fff;
+  font-family: inherit;
 }
 
-.reward-choice--relic h3 {
-  margin-top: 0;
+.reward-item-chip--relic {
+  background: linear-gradient(135deg, #b8860b, #f1c40f);
 }
 
-.reward-choice--potion {
-  min-width: 160px;
-  max-width: 220px;
-  background: #1c1c26;
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  cursor: pointer;
-  text-align: left;
+.reward-item-chip--potion {
+  background: linear-gradient(135deg, #16a085, #2980b9);
 }
 
-.reward-choice--potion h3 {
-  margin-top: 0;
+.reward-item-chip-icon {
+  font-size: 1.6rem;
+  line-height: 1;
 }
 
-.reward-pass-button {
+.reward-item-chip-name {
+  font-weight: 700;
+}
+
+.reward-item-chip-desc {
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+.reward-continue-button {
   margin-top: 1.5rem;
+}
+
+.reward-empty {
+  color: #999;
+  margin-top: 2rem;
 }
 
 .reward-deck-size {
   color: #999;
   margin-top: 1rem;
-}
-
-/* --- Shrine --- */
-
-.shrine-screen {
-  text-align: center;
-  padding: 2rem 0;
-}
-
-.shrine-choices {
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
-  margin-top: 2rem;
-}
-
-.shrine-choice {
-  min-width: 200px;
-  max-width: 260px;
-  background: #1c1c26;
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  cursor: pointer;
-  text-align: left;
-}
-
-.shrine-choice h3 {
-  margin-top: 0;
-}
-
-.shrine-pass-button {
-  margin-top: 1.5rem;
 }
 
 /* --- Shop --- */

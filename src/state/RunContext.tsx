@@ -7,11 +7,11 @@ import {
   applyCombatAction,
   resolveCombatEnd,
   chooseReward,
+  claimRewardRelic,
+  claimRewardPotion,
   skipReward,
   restHeal,
   restRemoveCard,
-  chooseRelic,
-  skipShrine,
   buyShopOption,
   resolveDeckAction,
   leaveShop,
@@ -24,11 +24,11 @@ type RunReducerAction =
   | { type: 'COMBAT'; action: CombatAction }
   | { type: 'RESOLVE_COMBAT_END' }
   | { type: 'CHOOSE_REWARD'; cardId: string }
+  | { type: 'CLAIM_REWARD_RELIC' }
+  | { type: 'CLAIM_REWARD_POTION' }
   | { type: 'SKIP_REWARD' }
   | { type: 'REST_HEAL' }
   | { type: 'REST_REMOVE_CARD'; cardId: string }
-  | { type: 'CHOOSE_RELIC'; relicId: string }
-  | { type: 'SKIP_SHRINE' }
   | { type: 'BUY_SHOP_OPTION'; optionId: string }
   | { type: 'RESOLVE_DECK_ACTION'; cardId: string }
   | { type: 'LEAVE_SHOP' }
@@ -49,16 +49,16 @@ function reducer(state: RunState, action: RunReducerAction): RunState {
       return resolveCombatEnd(state);
     case 'CHOOSE_REWARD':
       return chooseReward(state, action.cardId);
+    case 'CLAIM_REWARD_RELIC':
+      return claimRewardRelic(state);
+    case 'CLAIM_REWARD_POTION':
+      return claimRewardPotion(state);
     case 'SKIP_REWARD':
       return skipReward(state);
     case 'REST_HEAL':
       return restHeal(state);
     case 'REST_REMOVE_CARD':
       return restRemoveCard(state, action.cardId);
-    case 'CHOOSE_RELIC':
-      return chooseRelic(state, action.relicId);
-    case 'SKIP_SHRINE':
-      return skipShrine(state);
     case 'BUY_SHOP_OPTION':
       return buyShopOption(state, action.optionId);
     case 'RESOLVE_DECK_ACTION':
@@ -83,11 +83,11 @@ export function RunProvider({ children }: { children: ReactNode }) {
     dispatchCombat: (action) => dispatch({ type: 'COMBAT', action }),
     resolveCombatEnd: () => dispatch({ type: 'RESOLVE_COMBAT_END' }),
     chooseReward: (cardId) => dispatch({ type: 'CHOOSE_REWARD', cardId }),
+    claimRewardRelic: () => dispatch({ type: 'CLAIM_REWARD_RELIC' }),
+    claimRewardPotion: () => dispatch({ type: 'CLAIM_REWARD_POTION' }),
     skipReward: () => dispatch({ type: 'SKIP_REWARD' }),
     restHeal: () => dispatch({ type: 'REST_HEAL' }),
     restRemoveCard: (cardId) => dispatch({ type: 'REST_REMOVE_CARD', cardId }),
-    chooseRelic: (relicId) => dispatch({ type: 'CHOOSE_RELIC', relicId }),
-    skipShrine: () => dispatch({ type: 'SKIP_SHRINE' }),
     buyShopOption: (optionId) => dispatch({ type: 'BUY_SHOP_OPTION', optionId }),
     resolveDeckAction: (cardId) => dispatch({ type: 'RESOLVE_DECK_ACTION', cardId }),
     leaveShop: () => dispatch({ type: 'LEAVE_SHOP' }),

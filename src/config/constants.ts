@@ -212,10 +212,6 @@ export const REST_ROOM_RATIO = 0.15;
 // find than a heal/card-removal choice. First-cut number, not balance-tested.
 export const SHRINE_ROOM_RATIO = 0.08;
 
-// How many relic options a shrine offers at once -- see
-// rewardGenerator.ts's generateShrineOptions.
-export const SHRINE_OPTION_COUNT = 2;
-
 // Fraction of playerHPMax a rest room's "Rest" option restores (rounded,
 // capped at playerHPMax) -- the fix for the no-in-run-HP-recovery gap
 // (GAME_DESIGN.md §7/§10). First-cut number, not balance-tested.
@@ -293,10 +289,10 @@ export const STARTER_DECK: CreatureCard[] = SUIT_DEFINITIONS.flatMap((suitDef) =
 
 // --- Rewards ------------------------------------------------------------
 
-// Odds a reward offer's slot is a Quake card instead of an ordinary suited
-// one -- deliberately rarer than an ordinary suit pick, since a burst of
-// extra plays for a turn is one of the strongest things a card can do, and
-// it's a permanent deck addition rather than a one-turn-only mint.
+// Odds a reward screen's card slot is a Quake card instead of an ordinary
+// suited one -- deliberately rarer than an ordinary suit pick, since a burst
+// of extra plays for a turn is one of the strongest things a card can do,
+// and it's a permanent deck addition rather than a one-turn-only mint.
 export const QUAKE_REWARD_RATIO = 0.08;
 
 // How many bonus plays a Quake card grants (added straight to
@@ -304,39 +300,47 @@ export const QUAKE_REWARD_RATIO = 0.08;
 // played -- a flat, finite pool topper rather than true-unlimited plays.
 export const QUAKE_BONUS_PLAYS = 3;
 
-// Odds a reward offer's slot is a named special card (config/specialCards.ts)
-// instead of a plain suited one -- higher than Quake since a rider is a
-// smaller, non-permanent-turn-warping bonus, but still meaningfully rarer
-// than an ordinary suit pick so it reads as a notable find.
-export const SPECIAL_REWARD_RATIO = 0.15;
+// Odds a reward screen's card slot is a named special card (config/
+// specialCards.ts) instead of a plain suited one -- deliberately the
+// dominant outcome now: a plain copy is the "most common base card" a
+// player already has plenty of, so a reward should generally hand over the
+// next tier up (a named special) instead, with a plain copy as the rare
+// pick (its remainder share -- see rollRewardCard/generateShopOptions,
+// both of which compute their 'suit' weight as 1 minus every other
+// category, this one included).
+export const SPECIAL_REWARD_RATIO = 0.65;
 
-// Odds a reward offer's slot is a relic (config/relics.ts) instead of an
-// ordinary suited one -- rarer than a special card since a relic is a
-// run-long passive rather than one deck card, but still available from the
-// reward screen (not just a shrine) so relics aren't gated behind RNG luck
-// on shrine doors alone.
+// Independent per-screen odds a reward offer additionally carries a relic
+// row (config/relics.ts) -- unlike a card slot, a relic never competes with
+// the card row for space (see rewardGenerator.ts's generateRewardOffer):
+// this is simply whether the relic row exists at all this screen, capped at
+// one relic (rewardGenerator.ts's unheldRelics), same "leave it at one at a
+// time" rule a shrine's guaranteed relic already follows.
 export const RELIC_REWARD_RATIO = 0.1;
 
-// Odds a reward offer's slot is a potion (config/potions.ts) instead of an
-// ordinary suited one -- same tier as RELIC_REWARD_RATIO (a bit below it):
-// a potion is a consumable, not a permanent find, but it's still a discrete
-// item rather than one more deck card.
+// Independent per-screen odds a reward offer additionally carries a potion
+// row (config/potions.ts) -- same "own row, doesn't compete with cards"
+// shape as RELIC_REWARD_RATIO, just for potions.
 export const POTION_REWARD_RATIO = 0.1;
 
 // Combined cap across every held potion kind -- once RunState.potions.length
-// reaches this, the reward screen stops offering potions at all (see
-// rewardGenerator.ts's generateRewardOptions), same "already at the ceiling"
+// reaches this, the reward screen stops offering a potion row at all (see
+// rewardGenerator.ts's generateRewardOffer), same "already at the ceiling"
 // shape unheldRelics gives relics, just count-based since potions (unlike
 // relics) can duplicate. First-cut number, not balance-tested.
 export const POTION_INVENTORY_CAP = 4;
 
-// Odds a reward offer's slot is a Cleave card (MECHANIC_BRAINSTORM.md's AOE
-// tier 2) instead of an ordinary suited one -- same tier as
+// Odds a reward screen's card slot is a Cleave card (MECHANIC_BRAINSTORM.md's
+// AOE tier 2) instead of an ordinary suited one -- same tier as
 // QUAKE_REWARD_RATIO, since both are one-off setup cards rather than a
 // permanent per-suit boost.
 export const CLEAVE_REWARD_RATIO = 0.08;
 
-export const REWARD_OPTION_COUNT = 3;
+// How many card choices a reward screen's card row always carries, when it
+// carries one at all (see rewardGenerator.ts's generateRewardOffer) -- a
+// post-combat clear always offers exactly this many; a shrine's relic-only
+// offer carries none at all (see generateShrineReward).
+export const REWARD_CARD_COUNT = 3;
 
 // Probability mass a reward's suit-slot draws uniformly from the just-
 // cleared room's own threatSuits, instead of uniformly across every
@@ -380,9 +384,9 @@ export const CURRENCY_ENABLED = false;
 export const SHOP_ROOM_RATIO = 0;
 
 // How many priced options a shop offers at once -- deliberately more than
-// REWARD_OPTION_COUNT, since (unlike the reward screen's exclusive pick-1)
-// a shop visit can buy several of its offered slots, so "a wider offering"
-// needs more slots on the table to begin with.
+// REWARD_CARD_COUNT, since (unlike the reward screen's card row) a shop
+// visit can buy several of its offered slots, so "a wider offering" needs
+// more slots on the table to begin with.
 export const SHOP_OPTION_COUNT = 4;
 
 // Fixed price per offered optionType -- "spendable only at a fixed currency

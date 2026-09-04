@@ -1,12 +1,13 @@
 import { useRun } from '../../state/runContextObject';
 import { CardChip } from '../components/CardChip';
+import { RelicChip, PotionChip } from '../components/RewardItemChip';
 import { DECK_ACTION_INFO } from '../../config/deckActions';
 
 /**
- * A currency shop stop -- unlike RewardScreen/ShrineScreen's exclusive
- * pick-1, any number of the offered slots can be bought in one visit (each
- * click both spends currency and removes that slot from the list), then
- * Leave proceeds to the next door choice. See runEngine.ts's
+ * A currency shop stop -- unlike RewardScreen's exclusive card row, any
+ * number of the offered slots can be bought in one visit (each click both
+ * spends currency and removes that slot from the list), then Leave proceeds
+ * to the next door choice. See runEngine.ts's
  * buyShopOption/leaveShop. Buying a deck-action slot (Transform/Duplicate/
  * Upgrade) doesn't apply anything immediately -- it sets
  * state.pendingDeckAction, which swaps this screen over to a card-picker
@@ -52,12 +53,27 @@ export function ShopScreen() {
               </div>
             );
           }
-          const item =
-            option.optionType === 'relic' ? option.relic : option.optionType === 'potion' ? option.potion : DECK_ACTION_INFO[option.action];
+          if (option.optionType === 'relic') {
+            return (
+              <div key={option.id} className={className}>
+                <RelicChip relic={option.relic} onClick={buy} />
+                <p className="shop-price">{option.price} currency</p>
+              </div>
+            );
+          }
+          if (option.optionType === 'potion') {
+            return (
+              <div key={option.id} className={className}>
+                <PotionChip potion={option.potion} onClick={buy} />
+                <p className="shop-price">{option.price} currency</p>
+              </div>
+            );
+          }
+          const deckAction = DECK_ACTION_INFO[option.action];
           return (
             <div key={option.id} className={className} onClick={buy}>
-              <h3>{item.name}</h3>
-              <p>{item.description}</p>
+              <h3>{deckAction.name}</h3>
+              <p>{deckAction.description}</p>
               <p className="shop-price">{option.price} currency</p>
             </div>
           );

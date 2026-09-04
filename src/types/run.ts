@@ -11,19 +11,30 @@ export type RunPhase =
   | 'combat'
   | 'rest'
   | 'reward'
-  | 'shrine'
   | 'shop'
   | 'door-choice'
   | 'run-complete'
   | 'run-over';
 
-// A reward-screen slot is a card, a relic, or a potion -- tagged with
-// optionType rather than reusing Card.kind ('creature'/'quake'), which is a
-// different axis (what kind of card) than this (card vs relic vs potion).
-export type RewardOption =
-  | { id: string; optionType: 'card'; card: Card }
-  | { id: string; optionType: 'relic'; relic: RelicDef }
-  | { id: string; optionType: 'potion'; potion: PotionDef };
+// A reward screen's offer: always REWARD_CARD_COUNT card choices when cards
+// are on offer (a post-combat clear -- pick exactly one, or Pass; see
+// rewardGenerator.ts's generateRewardOffer), plus an independent relic row
+// and an independent potion row, each present or absent on its own -- a
+// relic/potion never competes with a card for the same slot the way the old
+// single-mixed-slot design worked. At most one relic and one potion per
+// screen, by design (see rewardGenerator.ts). A shrine-offering room (see
+// types/room.ts's ShrineRoomInstance) is just a RewardOffer with an empty
+// cardOptions and only its relic populated (generateShrineReward) -- there's
+// no separate shrine phase/screen, it's the same 'reward' phase and
+// RewardScreen as a post-combat clear. Each populated field is independently
+// click-to-claim (see runEngine.ts's chooseReward/claimRewardRelic/
+// claimRewardPotion) -- claiming one doesn't consume the others, and doesn't
+// leave the reward phase; only skipReward does that.
+export interface RewardOffer {
+  cardOptions: Card[];
+  relic: RelicDef | null;
+  potion: PotionDef | null;
+}
 
 // The 3 shop-only deck actions (MECHANIC_BRAINSTORM.md's Card Upgrade/Suit
 // Reroll/Duplicate) -- buying one doesn't apply anything itself, it sets
@@ -31,11 +42,13 @@ export type RewardOption =
 // card to act on (see runEngine.ts's resolveDeckAction).
 export type DeckActionKind = 'transform' | 'duplicate' | 'upgrade';
 
-// A shop-screen slot -- same shape as RewardOption, plus a fixed price (see
+// A shop-screen slot -- a card, a relic, a potion, or a deck-action, each
+// tagged with optionType and stamped with a fixed price (see
 // config/constants.ts's SHOP_CARD_PRICE/SHOP_RELIC_PRICE/SHOP_POTION_PRICE/
 // SHOP_TRANSFORM_PRICE/SHOP_DUPLICATE_PRICE/SHOP_UPGRADE_PRICE). Unlike a
-// reward, several of these can be bought in one shop visit -- see
-// runEngine.ts's buyShopOption.
+// RewardOffer's independent rows, every shop slot competes for the same
+// SHOP_OPTION_COUNT spots, and several can be bought in one shop visit --
+// see runEngine.ts's buyShopOption.
 export type ShopOption =
   | { id: string; optionType: 'card'; price: number; card: Card }
   | { id: string; optionType: 'relic'; price: number; relic: RelicDef }
@@ -58,13 +71,13 @@ export interface RunState {
   // deals a hand of its own.
   deck: Card[];
   // Persistent, run-level held relics (see types/relics.ts) -- grown by
-  // chooseReward's relic branch and chooseRelic, never shrinks (no
-  // duplicates are ever offered once a relic is held, see rewardGenerator.ts
-  // and generateShrineOptions). Copied into CombatState.relics at initCombat
-  // so combatEngine.ts's applyRelics can read it without extra plumbing.
+  // claimRewardRelic, never shrinks (no duplicates are ever offered once a
+  // relic is held, see rewardGenerator.ts's unheldRelics/generateRewardOffer/
+  // generateShrineReward). Copied into CombatState.relics at initCombat so
+  // combatEngine.ts's applyRelics can read it without extra plumbing.
   relics: RelicDef[];
   // Persistent, run-level held potions (see types/potions.ts) -- grown by
-  // chooseReward's potion branch, shrunk by combat's USE_FREE_CLAIM_POTION/
+  // claimRewardPotion, shrunk by combat's USE_FREE_CLAIM_POTION/
   // USE_SALT_POTION actions (synced back out of CombatState.potions by
   // runEngine.ts's applyCombatAction the same way playerHP is). Unlike
   // relics, duplicates are allowed and a used potion is actually consumed.
@@ -76,12 +89,10 @@ export interface RunState {
   // buyShopOption. Never resets mid-run, same persistence as deck/relics/
   // potions.
   currency: number;
-  // Set by resolveCombatEnd's room-cleared branch, consumed by chooseReward.
-  // Null outside the 'reward' phase.
-  rewardOptions: RewardOption[] | null;
-  // Set by chooseDoor's shrine branch, consumed by chooseRelic/skipShrine.
-  // Null outside the 'shrine' phase.
-  shrineOptions: RelicDef[] | null;
+  // Set by resolveCombatEnd's room-cleared branch or chooseDoor's shrine
+  // branch, consumed by chooseReward/claimRewardRelic/claimRewardPotion/
+  // skipReward. Null outside the 'reward' phase.
+  rewardOffer: RewardOffer | null;
   // Set by chooseDoor's shop branch, shrunk as options are bought
   // (buyShopOption), cleared by leaveShop. Null outside the 'shop' phase.
   shopOptions: ShopOption[] | null;

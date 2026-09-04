@@ -7,7 +7,7 @@ import type { SuitId } from '../types/suits';
 import { createRng, type Rng } from './rng';
 import { buildRunTree } from './runTree';
 import { initCombat, applyCombatAction as combatApplyAction } from './combatEngine';
-import { generateRewardOptions, generateShrineOptions, generateShopOptions, REWARD_SUITS } from './rewardGenerator';
+import { generateRewardOffer, generateShrineReward, generateShopOptions, REWARD_SUITS } from './rewardGenerator';
 import { uniformPick, pickDistinct } from './weightedPick';
 import { specialCardsBySuit } from '../config/specialCards';
 import { PLAYER_HP_MAX, REST_HEAL_PCT, RUN_MAX_DEPTH, STARTER_ATTACK_SUIT_COUNT, THREAT_SUITS, buildStarterDeck } from '../config/constants';
@@ -39,8 +39,7 @@ export function createNewRun(seed: number): RunState {
     relics: [],
     potions: [],
     currency: 0,
-    rewardOptions: null,
-    shrineOptions: null,
+    rewardOffer: null,
     shopOptions: null,
     pendingDeckAction: null,
     currentDoors: null,
@@ -92,11 +91,11 @@ export function resolveCombatEnd(run: RunState): RunState {
   }
 
   // The just-cleared room's own threatSuits (still readable off run.combat
-  // here, before it's cleared below) bias the reward's suit-slot odds --
+  // here, before it's cleared below) bias the reward's card-row suit odds --
   // MECHANIC_BRAINSTORM.md's "Reward weighting toward the cleared room's
   // threat suits".
-  const rewardOptions = generateRewardOptions(newDepth, run.rng, run.relics, run.potions, run.combat.roomParams.threatSuits);
-  return { ...run, depth: newDepth, phase: 'reward', rewardOptions };
+  const rewardOffer = generateRewardOffer(newDepth, run.rng, run.relics, run.potions, run.combat.roomParams.threatSuits);
+  return { ...run, depth: newDepth, phase: 'reward', rewardOffer };
 }
 
 /**
@@ -117,34 +116,47 @@ function proceedToDoors(run: RunState): RunState {
   return { ...run, phase: 'door-choice', currentDoors: doors };
 }
 
-/** Appends the chosen reward option to the persistent deck or held relics (per its optionType), then proceeds to door generation. */
-export function chooseReward(run: RunState, optionId: string): RunState {
-  if (run.phase !== 'reward' || !run.rewardOptions) return run;
-  const chosen = run.rewardOptions.find((o) => o.id === optionId);
+/**
+ * Appends the chosen card (by id, from rewardOffer.cardOptions) to the
+ * persistent deck, then proceeds to door generation -- unlike
+ * claimRewardRelic/claimRewardPotion below, picking a card is exclusive
+ * (only one of the offered cards can ever be taken) and always ends the
+ * reward phase, since the card row is the reward screen's one real
+ * either/or decision. Any relic/potion row still sitting unclaimed in
+ * rewardOffer is simply left behind, same as clicking Pass would leave it.
+ */
+export function chooseReward(run: RunState, cardId: string): RunState {
+  if (run.phase !== 'reward' || !run.rewardOffer) return run;
+  const chosen = run.rewardOffer.cardOptions.find((c) => c.id === cardId);
   if (!chosen) return run;
+  return proceedToDoors({ ...run, deck: [...run.deck, chosen], rewardOffer: null });
+}
 
-  const next =
-    chosen.optionType === 'card'
-      ? { ...run, deck: [...run.deck, chosen.card] }
-      : chosen.optionType === 'relic'
-        ? { ...run, relics: [...run.relics, chosen.relic] }
-        : { ...run, potions: [...run.potions, chosen.potion] };
-  return proceedToDoors({ ...next, rewardOptions: null });
+/** Adds the offered relic to held relics and clears it off the offer, but stays in the reward phase -- claiming a relic doesn't end the visit, since it's an independent row from the card choice (see types/run.ts's RewardOffer). A no-op if no relic is currently on offer (already claimed, or never rolled). */
+export function claimRewardRelic(run: RunState): RunState {
+  if (run.phase !== 'reward' || !run.rewardOffer?.relic) return run;
+  const relic = run.rewardOffer.relic;
+  return { ...run, relics: [...run.relics, relic], rewardOffer: { ...run.rewardOffer, relic: null } };
+}
+
+/** Adds the offered potion to held potions and clears it off the offer, but stays in the reward phase -- same independent-row shape as claimRewardRelic. A no-op if no potion is currently on offer. */
+export function claimRewardPotion(run: RunState): RunState {
+  if (run.phase !== 'reward' || !run.rewardOffer?.potion) return run;
+  const potion = run.rewardOffer.potion;
+  return { ...run, potions: [...run.potions, potion], rewardOffer: { ...run.rewardOffer, potion: null } };
 }
 
 /**
- * Leaves the deck untouched and proceeds to door generation -- the general
- * "I'm done here" exit from the reward phase. Deliberately screen-level
- * rather than a per-option decline: today's reward phase is a single
- * pick-one-of-N card offer, but it's designed to stay correct once the
- * phase can offer other optional things later (see GAME_DESIGN.md's
- * proposed-features section) -- passing always just
- * means "proceed with whatever I've already taken," never a specific
- * card's own opt-out.
+ * Leaves whatever's still unclaimed on the offer behind and proceeds to
+ * door generation -- the general "I'm done here" exit from the reward
+ * phase. Whatever the player already took via chooseReward/
+ * claimRewardRelic/claimRewardPotion stays taken; this only ever discards
+ * what's left in rewardOffer, never anything already applied to
+ * deck/relics/potions.
  */
 export function skipReward(run: RunState): RunState {
   if (run.phase !== 'reward') return run;
-  return proceedToDoors({ ...run, rewardOptions: null });
+  return proceedToDoors({ ...run, rewardOffer: null });
 }
 
 export function chooseDoor(run: RunState, doorId: string): RunState {
@@ -167,11 +179,22 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
   }
 
   if (node.room.kind === 'shrine') {
-    // Generated live off run.rng, not precomputed in the tree -- see
-    // types/room.ts's ShrineRoomInstance for why (it must exclude relics
+    // Resolves into the same 'reward' phase/RewardScreen a cleared combat
+    // room uses -- just with an empty cardOptions and only its relic row
+    // populated (see types/room.ts's ShrineRoomInstance, types/run.ts's
+    // RewardOffer). Depth advances immediately, same timing as
+    // resolveCombatEnd's own reward generation, since a shrine's reward
+    // phase exits via the same plain proceedToDoors chooseReward/
+    // claimRewardRelic/skipReward already use, not finishSideRoom's
+    // exit-time increment. Generated live off run.rng, not precomputed in
+    // the tree -- see ShrineRoomInstance for why (it must exclude relics
     // the player already holds by the time they arrive).
-    const shrineOptions = generateShrineOptions(run.rng, run.relics);
-    return { ...base, phase: 'shrine' as const, combat: null, shrineOptions };
+    const newDepth = run.depth + 1;
+    if (newDepth >= run.maxDepth) {
+      return { ...base, depth: newDepth, phase: 'run-complete' as const };
+    }
+    const rewardOffer = generateShrineReward(run.rng, run.relics);
+    return { ...base, depth: newDepth, phase: 'reward' as const, combat: null, rewardOffer };
   }
 
   if (node.room.kind === 'shop') {
@@ -187,10 +210,10 @@ export function chooseDoor(run: RunState, doorId: string): RunState {
 }
 
 /**
- * Shared tail for both rest and shrine rooms -- neither grants a card
- * reward (unlike clearing a combat room), so this advances depth and goes
- * straight to door generation, skipping the 'reward' phase entirely. Also
- * guards the (currently unreachable, since REST_ROOM_RATIO/SHRINE_ROOM_RATIO's
+ * Shared tail for rest and shop rooms -- neither grants a reward the way
+ * clearing a combat room (or visiting a shrine) does, so this advances depth
+ * and goes straight to door generation, skipping the 'reward' phase
+ * entirely. Also guards the (currently unreachable, since REST_ROOM_RATIO's
  * roll is skipped once floor >= RUN_MAX_DEPTH) case of a side room landing on
  * the run's last room, same defensive shape as resolveCombatEnd.
  */
@@ -216,20 +239,6 @@ export function restRemoveCard(run: RunState, cardId: string): RunState {
   if (!run.deck.some((c) => c.id === cardId)) return run;
   const deck = run.deck.filter((c) => c.id !== cardId);
   return finishSideRoom({ ...run, deck });
-}
-
-/** Adds the chosen relic (by id) to the persistent held-relics list and leaves the shrine. Exclusive with skipShrine -- see ShrineScreen.tsx. */
-export function chooseRelic(run: RunState, relicId: string): RunState {
-  if (run.phase !== 'shrine' || !run.shrineOptions) return run;
-  const chosen = run.shrineOptions.find((r) => r.id === relicId);
-  if (!chosen) return run;
-  return finishSideRoom({ ...run, relics: [...run.relics, chosen], shrineOptions: null });
-}
-
-/** Leaves the shrine with no relic taken -- the general "I'm done here" exit, same shape as skipReward. */
-export function skipShrine(run: RunState): RunState {
-  if (run.phase !== 'shrine') return run;
-  return finishSideRoom({ ...run, shrineOptions: null });
 }
 
 /**
@@ -305,7 +314,7 @@ export function resolveDeckAction(run: RunState, cardId: string): RunState {
   return { ...run, deck, pendingDeckAction: null };
 }
 
-/** Leaves the shop, buying nothing further -- the general "I'm done here" exit, same shape as skipShrine/skipReward. */
+/** Leaves the shop, buying nothing further -- the general "I'm done here" exit, same shape as skipReward. */
 export function leaveShop(run: RunState): RunState {
   if (run.phase !== 'shop') return run;
   return finishSideRoom({ ...run, shopOptions: null });
